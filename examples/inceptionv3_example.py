@@ -13,9 +13,9 @@ if __name__ == '__main__':
     iterations = 300
     batch_size = 1  # Inception-v3需要更多内存，使用较小batch
     input_size = 299  # Inception-v3的标准输入尺寸
-    
+
     # 创建输入张量
-    x = torch.randint(low=0, high=256, size=(batch_size, 3, input_size, input_size), 
+    x = torch.randint(low=0, high=256, size=(batch_size, 3, input_size, input_size),
                      dtype=torch.float32).to(device="cuda:0")
     
     # 创建Inception-v3模型 (注意输出格式处理)

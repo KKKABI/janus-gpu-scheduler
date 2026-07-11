@@ -98,7 +98,12 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
     for idx, c in enumerate(candidates):
         S_time = norm_T[idx]
         S_res = (norm_th[idx] + norm_reg[idx] + norm_mem[idx]) / 3.0
+
+
         CSS = 0.5 * S_time + 0.5 * S_res
+        # # 不需要时间占比
+        #CSS = S_res
+
         if CSS < tau:
             node = c['node']
             node.is_lowpriority = True
@@ -159,8 +164,12 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
 
     while queue:
         lowpriority_ops = pop_lowPriorty_from_queue(queue)
-        ready_ops = enqueue_ready_nodes(queue)        
+        ready_ops = enqueue_ready_nodes(queue)
+
+
         scheduled_ops = scheduler.schedule(ready_ops, current_time)
+        #不需要Simulator       
+        #scheduled_ops = ready_ops
 
         allocate_streams = []
         # for i , op in enumerate(scheduled_ops):

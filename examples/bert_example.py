@@ -22,11 +22,11 @@ if __name__ == '__main__':
     iterations = 300
     batch_size = 1
     seq_length = 16
-    
+
     # 加载bert-base模型
     model = BertModel.from_pretrained('/public_0/ZYF/model/bert-base').eval()
     model = model.to("cuda:0")
-    
+
     # 准备BERT输入 - 使用原始随机生成方式
     input_ids = torch.randint(0, 30000, (batch_size, seq_length), dtype=torch.long).to("cuda:0")
     attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long).to("cuda:0")

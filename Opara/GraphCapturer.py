@@ -138,8 +138,12 @@ def capturer(inputs, model, copy_outputs: bool = False):
    
     priority_streams.create_priority_streams(max_width)
     
+    # 优先级流
     stream_ptrs = priority_streams.get_all_stream_ptrs()
     all_streams = [torch.cuda.ExternalStream(ptr) for ptr in stream_ptrs]
+
+    # # 直接创建普通 CUDA 流，不使用 priority_streams 模块
+    #all_streams = [torch.cuda.Stream() for _ in range(max_width)]
 
     
     graph = fx_module.graph

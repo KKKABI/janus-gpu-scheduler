@@ -11,7 +11,63 @@ path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
 output_file = open(output_file_path, "w")
 
-def pop_lowPriorty_from_queue(queue, tau=0.5):
+def compute_node_slack(fx_nodes):
+    """
+    使用 profile duration 计算每个节点的 slack（松弛时间）。
+
+    原理：
+    - earliest_start[node] = max(所有前驱的 earliest_start + duration)
+    - latest_finish[node]  = min(所有后继的 latest_finish - duration)
+    - slack[node] = latest_finish - earliest_start - duration
+
+    slack > 0 表示该节点可以在不延长 DAG 总执行时间的前提下推迟调度。
+    """
+    import torch
+
+    def get_duration(node):
+        if not hasattr(node, 'info') or not node.info:
+            return 0.0
+        return sum(info['dur'] for info in node.info) / 1000.0  # 单位: μs
+
+    topo_order = list(fx_nodes)
+
+    # Forward pass: 最早开始时间
+    earliest_start = {}
+    for node in topo_order:
+        max_pred_end = 0.0
+        for pred in node.all_input_nodes:
+            if isinstance(pred, torch.fx.Node):
+                pred_end = earliest_start.get(pred, 0.0) + get_duration(pred)
+                max_pred_end = max(max_pred_end, pred_end)
+        earliest_start[node] = max_pred_end
+
+    total_time = max(
+        (earliest_start.get(node, 0.0) + get_duration(node))
+        for node in topo_order
+    ) if topo_order else 0.0
+
+    # Backward pass: 最晚结束时间
+    latest_finish = {}
+    for node in reversed(topo_order):
+        min_succ_start = total_time
+        for succ in node.users:
+            if isinstance(succ, torch.fx.Node):
+                succ_latest_start = latest_finish.get(succ, total_time) - get_duration(succ)
+                min_succ_start = min(min_succ_start, succ_latest_start)
+        latest_finish[node] = min_succ_start
+
+    # Slack 计算
+    slack = {}
+    for node in topo_order:
+        dur = get_duration(node)
+        est = earliest_start.get(node, 0.0)
+        lft = latest_finish.get(node, total_time)
+        slack[node] = max(0.0, lft - est - dur)
+
+    return slack
+
+
+def pop_lowPriorty_from_queue(queue, slack=None, tau=0.5, max_light_dur=100.0, slack_ratio=0.3):
     """根据 Co-location Suitability Score (CSS) 从队列中弹出低优先级算子。
 
     计算方法（对队列中具有 kernel 信息的节点集合 V）：
@@ -94,24 +150,30 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
     norm_reg = normalize(ln_reg)
     norm_mem = normalize(ln_mem)
 
-    # 计算 CSS，并弹出低优先级节点
+    # 计算 CSS，分级处理
     for idx, c in enumerate(candidates):
         S_time = norm_T[idx]
         S_res = (norm_th[idx] + norm_reg[idx] + norm_mem[idx]) / 3.0
 
-
         CSS = 0.5 * S_time + 0.5 * S_res
-        # # 不需要时间占比
-        #CSS = S_res
 
         if CSS < tau:
             node = c['node']
-            node.is_lowpriority = True
-            try:
-                queue.remove(node)
-            except ValueError:
-                pass
-            lowpriority.append(node)
+            duration = c['T_op_raw']  # 原始执行时长（μs）
+
+            if duration < max_light_dur:
+                # LP-light: 短算子，跟 HP 同轮捡漏
+                node.is_lowpriority = True
+                try:
+                    queue.remove(node)
+                except ValueError:
+                    pass
+                lowpriority.append(node)
+            elif slack is not None and slack.get(node, 0.0) > duration * slack_ratio:
+                # LP-heavy: 大算子且有足够的 slack → defer 到 Phase 2
+                node.is_lp_heavy = True
+                # 不 remove，由 launch() 统一管理
+            # else: LP-heavy 但 slack 不足 → 留在队列当 HP 处理
 
     return lowpriority
 
@@ -119,7 +181,7 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
 
 
 
-def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width):
+def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width, slack=None):
 
     sm_specs = {
         'shared_mem_total': sharedMemPerMultiprocessor,
@@ -130,7 +192,7 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
     scheduler = Scheduler(resource_model)
     current_time = 0.0
 
-    
+
     # 从 FX node 构建 KernelProfile 列表
     def kernel_profiles_from_node(node):
         return [
@@ -138,7 +200,7 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
                 name=info["name"],
                 duration=info["dur"] / 1000.0,
                 shared_mem=info["args"].get("shared memory", 0),
-                registers=info["args"].get("registers per thread", 0) * 
+                registers=info["args"].get("registers per thread", 0) *
                           info["args"]["block"][0] * info["args"]["block"][1] * info["args"]["block"][2],
                 warps=(info["args"]["block"][0] * info["args"]["block"][1] * info["args"]["block"][2] + 32 - 1) // 32,
                 blocks=info["args"]["grid"][0] * info["args"]["grid"][1] * info["args"]["grid"][2]
@@ -149,12 +211,12 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
     queue = deque()
     prestage_ops = []
     result = []
-    # 当前轮 ready 节点（每轮使用新的容器记录 ready 节点）
-    
+    deferred_heavy = []  # LP-heavy 节点暂存到 Phase 2
+
     def enqueue_ready_nodes(queue):
-        ready_ops = []             
-        for node in queue:            
-            kernels = kernel_profiles_from_node(node)            
+        ready_ops = []
+        for node in queue:
+            kernels = kernel_profiles_from_node(node)
             ready_ops.append(OperatorTask(node.name, kernels))
         return ready_ops
 
@@ -162,24 +224,34 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
         if deg == 0:
             queue.append(node)
 
+    # ========== Phase 1: HP + LP-light ==========
     while queue:
-        lowpriority_ops = pop_lowPriorty_from_queue(queue)
+        # 1. 提取 LP-light；LP-heavy 被标记 is_lp_heavy 但不出队列
+        lowpriority_ops = pop_lowPriorty_from_queue(queue, slack)
+
+        # 2. 将 LP-heavy 从队列中取出，暂存到 Phase 2
+        lp_heavy_round = []
+        remaining = deque()
+        for node in queue:
+            if getattr(node, 'is_lp_heavy', False):
+                node.is_lowpriority = False  # 确保不被当作 LP-light 处理
+                lp_heavy_round.append(node)
+            else:
+                remaining.append(node)
+        queue = remaining
+        deferred_heavy.extend(lp_heavy_round)
+
+        # 如果没有 HP 或 LP-light 留下，退出 Phase 1
+        if not queue:
+            break
+
+        # 3. 调度 HP（非 lowpriority、非 heavy 的节点）
         ready_ops = enqueue_ready_nodes(queue)
-
-
         scheduled_ops = scheduler.schedule(ready_ops, current_time)
-        #不需要Simulator       
-        #scheduled_ops = ready_ops
 
         allocate_streams = []
-        # for i , op in enumerate(scheduled_ops):
-        #     result.append(op.name)
-        #     node = nodes[op.name]
-        #     stream = all_streams[i]
-        #     node.stream = stream
-        #     # print(node.stream)
-        for op in scheduled_ops: 
-            node = nodes[op.name]            
+        for op in scheduled_ops:
+            node = nodes[op.name]
             for input_node in node.all_input_nodes:
                 if input_node.name in prestage_ops and input_node.node_to_bool is False:
                     result.append(op.name)
@@ -200,7 +272,6 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
                         node.stream = all_streams[i]
                         allocate_streams.append(node.stream)
                         break
-            # print(node.stream)
             for pre_op in prestage_ops:
                 pre_node = nodes[pre_op]
                 if node.stream != pre_node.stream:
@@ -209,38 +280,107 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
         for op in scheduled_ops:
             prestage_ops.append(op.name)
 
+        # 4. LP-light 分配普通流
         for node in lowpriority_ops:
             result.append(node.name)
             for input_node in node.all_input_nodes:
                 if input_node.node_to_bool is False and input_node.is_lowpriority is True:
                     node.stream = input_node.stream
-                    # print(node.stream)
                     input_node.node_to_bool = True
                     break
             if node.stream is None:
                 node.stream = Stream()
-                # print(node.stream)
                 all_streams.append(node.stream)
-        
-        new_queue = deque()
+
+        # 5. 构建已调度节点列表（用于 queue 维护 + in_degree）
         scheduled_node_names = []
         for op in scheduled_ops:
             scheduled_node_names.append(op.name)
         for node in lowpriority_ops:
             scheduled_node_names.append(node.name)
-        
-        for node in queue:
-            if node.name not in scheduled_node_names:
-                new_queue.append(node)
-        queue = new_queue 
-        # current_time = resource_model.run_until_next_launchable()      
-        # 更新下一阶段
-  
-        for name  in scheduled_node_names:
+
+        # 从 queue 中移除已调度的节点
+        queue = deque(n for n in queue if n.name not in scheduled_node_names)
+
+        # 更新 in_degree（HP + LP-light）
+        for name in scheduled_node_names:
             for user in nodes[name].users:
                 in_degree[user] -= 1
                 if in_degree[user] == 0:
                     queue.append(user)
+
+        # 更新 in_degree（LP-heavy 算作"已调度"以解开后继依赖）
+        for node in lp_heavy_round:
+            for user in nodes[node.name].users:
+                in_degree[user] -= 1
+                if in_degree[user] == 0:
+                    queue.append(user)
+
+        # current_time = resource_model.run_until_next_launchable()
+
+    # ========== Phase 2: LP-heavy 调度 ==========
+    if deferred_heavy:
+        queue = deque(deferred_heavy)
+        prestage_ops.clear()
+
+        while queue:
+            ready_ops = enqueue_ready_nodes(queue)
+            scheduled_ops = scheduler.schedule(ready_ops, current_time)
+
+            if not scheduled_ops:
+                break
+
+            # Stream 分配（复用 priority stream）
+            allocate_streams = []
+            for op in scheduled_ops:
+                node = nodes[op.name]
+                for input_node in node.all_input_nodes:
+                    if input_node.name in prestage_ops and input_node.node_to_bool is False:
+                        node.stream = input_node.stream
+                        allocate_streams.append(node.stream)
+                        input_node.node_to_bool = True
+                        break
+                for pre_op in prestage_ops:
+                    pre_node = nodes[pre_op]
+                    if node.stream != pre_node.stream:
+                        node.event_to_wait.append(pre_node.event)
+
+            for op in scheduled_ops:
+                node = nodes[op.name]
+                if node.stream is None:
+                    for i in range(max_width):
+                        if all_streams[i] not in allocate_streams:
+                            node.stream = all_streams[i]
+                            allocate_streams.append(node.stream)
+                            break
+                    if node.stream is None:
+                        # 所有 priority stream 已被占用，新建普通流
+                        node.stream = Stream()
+                        all_streams.append(node.stream)
+                for pre_op in prestage_ops:
+                    pre_node = nodes[pre_op]
+                    if node.stream != pre_node.stream:
+                        node.event_to_wait.append(pre_node.event)
+
+            prestage_ops.clear()
+            for op in scheduled_ops:
+                prestage_ops.append(op.name)
+
+            # 加入 result（排在 Phase 1 所有节点之后）
+            for op in scheduled_ops:
+                result.append(op.name)
+
+            # 从 queue 中移除已调度的节点
+            scheduled_names = [op.name for op in scheduled_ops]
+            queue = deque(n for n in queue if n.name not in scheduled_names)
+
+            # 更新 in_degree
+            for name in scheduled_names:
+                for user in nodes[name].users:
+                    in_degree[user] -= 1
+                    if in_degree[user] == 0:
+                        queue.append(user)
+
     return result
     
     
@@ -361,7 +501,10 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width):
 
     torch_nodes , in_degree = get_topo(graph_module.graph.nodes)
 
-    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width)
+    # 计算 DAG 松弛时间，用于 LP-heavy defer 决策
+    slack = compute_node_slack(graph_module.graph.nodes)
+
+    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, slack=slack)
     
     # for stream in all_streams:
     #     print(stream)

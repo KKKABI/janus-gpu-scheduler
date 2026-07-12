@@ -1,7 +1,5 @@
 from typing import List
-from copy import deepcopy
 import copy
-import heapq
 from itertools import combinations
 
 
@@ -294,34 +292,71 @@ class Scheduler:
             best_combo = max(combo_scores, key=lambda x: x[1])[0]
             return best_combo
 
-        # 内存密集型判断函数（根据算子名判断）
-        memory_intensive_ops = ['add', 'cast', 'ceil', 'clip', 'concat', 'exp', 'floor', 'log',
-                                'gelu', 'neg', 'pow', 'reciprocal', 'relu', 'sigmoid', 'slice', 'relu'
-                                'sqrt', 'sub', 'tanh', 'transpose', 'unsqueeze', 'view', 'avg_pool',
-                                'reshape', 'max_pool', 'adaptive_avg_pool', 'adaptive_max_pool', 'premute',
-                                'flatten', 'dropout', 'batch_norm', 'layer_norm', 'instance_norm', 'contiguous', 'ones', 'to']
+        # ===== Direction B: 基于 profile 数据的资源多样度打分 =====
+        def resource_diversity_score(combo):
+            """
+            计算组合内算子的资源使用多样度。
+            分数越低 → 算子的资源需求互补性越好 → interference 越少。
+            对 size=1 的组合返回 0（单个算子无 interference 问题）。
+            """
+            if len(combo) <= 1:
+                return 0.0
 
-        def is_mem_access_intensive(op_name: str) -> bool:
-            name = op_name.lower()
-            for op in memory_intensive_ops:
-                if op in name:
-                    return True
-            return False
-
-        # 在 top_candidates 中选择计算/内存比例最接近 1:1 的组合
-        def imbalance_score(combo):
-            mem = 0
-            comp = 0
+            # 构建每个算子的资源特征向量（per-block 平均）
+            profiles = []
             for op in combo:
-                if is_mem_access_intensive(op.name):
-                    mem += 1
+                reg = 0.0
+                smem = 0.0
+                warps = 0.0
+                dur = 0.0
+                blocks = 0
+                for k in op.kernels:
+                    # registers 已在 OperatorLauncher 中计算为 regs_per_thread * threads_per_block（per-block 值）
+                    reg += k.registers * k.blocks
+                    smem += k.shared_mem * k.blocks
+                    warps += k.warps * k.blocks
+                    dur += k.duration * k.blocks
+                    blocks += k.blocks
+                if blocks > 0:
+                    profiles.append([reg / blocks, smem / blocks, warps / blocks, dur / blocks])
                 else:
-                    comp += 1
-            # 目标是使 comp ~= mem，使用绝对差作为得分（越小越好）
-            return abs(comp - mem), -sum(s for c, s in combo_scores if c == combo)
+                    profiles.append([0.0, 0.0, 0.0, 0.0])
 
-        # 选择最小绝对差；若相同则选择占用率更高的
-        best_combo = min(top_candidates, key=lambda c: (imbalance_score(c)))
+            # 每维 min-max 归一化
+            n_dims = 4
+            for d in range(n_dims):
+                vals = [p[d] for p in profiles]
+                vmin, vmax = min(vals), max(vals)
+                if vmax > vmin:
+                    for p in profiles:
+                        p[d] = (p[d] - vmin) / (vmax - vmin)
+                else:
+                    for p in profiles:
+                        p[d] = 0.5
+
+            # 两两计算余弦相似度
+            total_sim = 0.0
+            pairs = 0
+            for i in range(len(profiles)):
+                for j in range(i + 1, len(profiles)):
+                    dot = sum(profiles[i][d] * profiles[j][d] for d in range(n_dims))
+                    ni = sum(profiles[i][d] ** 2 for d in range(n_dims)) ** 0.5
+                    nj = sum(profiles[j][d] ** 2 for d in range(n_dims)) ** 0.5
+                    if ni > 0 and nj > 0:
+                        total_sim += dot / (ni * nj)
+                    else:
+                        total_sim += 1.0  # 零向量 → 无法区分
+                    pairs += 1
+
+            return total_sim / pairs if pairs > 0 else 1.0
+
+        def combo_sort_key(combo):
+            sim = resource_diversity_score(combo)
+            occ = next(s for c, s in combo_scores if c is combo)
+            return (sim, -occ)
+
+        # 选资源多样度最高（相似度最低）的组合，同分时选占用率高的
+        best_combo = min(top_candidates, key=combo_sort_key)
         return best_combo
 
 

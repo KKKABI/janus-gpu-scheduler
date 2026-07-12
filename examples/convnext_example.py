@@ -85,18 +85,18 @@ def flush_cache():
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 if __name__ == '__main__':
-    warm_ups = 10
-    iterations = 300
+    warm_ups = 3
+    iterations = 20
 
     x = torch.randn(1, 3, 224, 224, device="cuda")
     model = torchvision.models.convnext_base(pretrained=False).eval().cuda()
 
     inputs = (x,)
     y = run_torch_model(model, inputs, iterations, warm_ups)
-    run_sequence_graph(model, inputs, iterations, warm_ups, 0, 300)
+    run_sequence_graph(model, inputs, iterations, warm_ups, 0, iterations)
 
     Opara = GraphCapturer.capturer(inputs, model)
-    output = run_parallel_graph(Opara, inputs, iterations, warm_ups, 0, 300)
+    output = run_parallel_graph(Opara, inputs, iterations, warm_ups, 0, iterations)
 
     res = output[0] if isinstance(output, (tuple, list)) else output
     if res.dtype == torch.float16:

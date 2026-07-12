@@ -252,6 +252,12 @@ class Scheduler:
         combo_scores = []  # list of (combo_list, occupancy_score)
 
         max_comb_size = min(5, len(ready_ops))
+        # 防止组合爆炸：max_width > 15 时截断，否则 C(83,5) ≈ 3000万无法接受
+        MAX_READY = 15
+        if max_comb_size == 5 and len(ready_ops) > MAX_READY:
+            ready_ops = sorted(ready_ops, key=lambda op: sum(
+                k.duration for k in op.kernels
+            ), reverse=True)[:MAX_READY]
         for r in range(1, max_comb_size + 1):
             for combo in combinations(ready_ops, r):
                 virtual_model = copy.deepcopy(self.resource_model)

@@ -253,6 +253,13 @@ class Scheduler:
         # 枚举所有候选组合并计算每个组合的 SM 占用率（occupancy）
         combo_scores = []  # list of (combo_list, occupancy_score)
 
+        # 防止组合爆炸：max_width > 15 时截断，否则 C(83,5) ≈ 3000万无法接受
+        MAX_READY = 15
+        if len(ready_ops) > MAX_READY:
+            ready_ops = sorted(ready_ops, key=lambda op: sum(
+                k.duration for k in op.kernels
+            ), reverse=True)[:MAX_READY]
+
         max_comb_size = min(5, len(ready_ops))
         for r in range(1, max_comb_size + 1):
             for combo in combinations(ready_ops, r):

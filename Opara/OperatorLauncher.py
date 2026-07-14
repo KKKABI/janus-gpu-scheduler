@@ -330,7 +330,7 @@ def get_topo(fx_nodes):
            in_degree[node] += 1
     return nodes , in_degree
 
-def recompile(model_class_name, graph_module, inputs, all_streams, max_width):
+def recompile(model_class_name, graph_module, inputs, all_streams, max_width, sm_fraction=1.0):
     
     path = os.path.abspath(os.path.dirname(__file__))
     # model_class_name = graph_module.__class__.__name__
@@ -342,13 +342,17 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width):
         ModelProfiler.profile_serial(graph_module, inputs, path)
     node2kernels, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor , numSms = get_resource_from_json(path)
 
+    # Apply SM fraction for multi-tenant scenarios (e.g. 2 concurrent → 0.5)
+    numSms = max(1, int(numSms * sm_fraction))
+    print(f"[recompile] sm_fraction={sm_fraction}, effective_numSms={numSms}")
+
     for i, node in enumerate(graph_module.graph.nodes):
         if not hasattr(node, 'info'):
             if i < len(node2kernels):
                 setattr(node, 'info', node2kernels[i])
             else:
                 setattr(node, 'info', [])  # 默认空列表，如果没有kernel信息
-       
+
 
     torch_nodes , in_degree = get_topo(graph_module.graph.nodes)
 

@@ -2,6 +2,7 @@ import torch
 from torch.fx import Interpreter
 import torch._dynamo as dynamo
 from Opara import OperatorLauncher
+from Opara import Critical_node
 # from Opara import StreamAllocator
 from torch._functorch.partitioners import draw_graph
 from collections import defaultdict,deque
@@ -111,7 +112,7 @@ def compute_max_parallel_width(fx_module: torch.fx.GraphModule) -> int:
             
 
 
-def capturer(inputs, model, copy_outputs: bool = False):
+def capturer(inputs, model, copy_outputs: bool = False, sm_fraction: float = 1.0):
     assert isinstance(inputs, (list, tuple)), f"inputs is of type {type(inputs)} instead of list"
     static_inputs = [torch.zeros_like(x, device='cuda') for x in inputs]
 
@@ -153,8 +154,9 @@ def capturer(inputs, model, copy_outputs: bool = False):
 
     for node in graph.nodes:
         node.event = Event()
-            
-    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams , max_width)
+
+    Critical_node.mark_critical_nodes(graph)
+    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, sm_fraction)
 
     print(stream for stream in all_streams)
         

@@ -112,7 +112,7 @@ def compute_max_parallel_width(fx_module: torch.fx.GraphModule) -> int:
             
 
 
-def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9):
+def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mode='cosine', time_domain=True):
     assert isinstance(inputs, (list, tuple)), f"inputs is of type {type(inputs)} instead of list"
     static_inputs = [torch.zeros_like(x, device='cuda') for x in inputs]
 
@@ -160,7 +160,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9):
         node.event = Event()
 
     Critical_node.mark_critical_nodes(graph)
-    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, alpha)
+    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, alpha, selection_mode, time_domain)
 
     print(stream for stream in all_streams)
         

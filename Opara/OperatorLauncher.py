@@ -119,15 +119,15 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
 
 
 
-def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width, alpha=0.9):
+def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width, alpha=0.9, selection_mode='cosine', time_domain=True):
 
     sm_specs = {
         'shared_mem_total': sharedMemPerMultiprocessor,
         'register_total': regsPerMultiprocessor,
         'warp_total': maxThreadsPerMultiprocessor//32
     }
-    resource_model = ResourceModel(sm_count=numSms, sm_specs=sm_specs)
-    scheduler = Scheduler(resource_model, alpha)
+    resource_model = ResourceModel(sm_count=numSms, sm_specs=sm_specs, time_domain=time_domain)
+    scheduler = Scheduler(resource_model, alpha, selection_mode, time_domain)
     current_time = 0.0
 
     
@@ -341,7 +341,7 @@ def get_topo(fx_nodes):
            in_degree[node] += 1
     return nodes , in_degree
 
-def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9):
+def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9, selection_mode='cosine', time_domain=True):
     
     path = os.path.abspath(os.path.dirname(__file__))
     # model_class_name = graph_module.__class__.__name__
@@ -363,7 +363,7 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, al
 
     torch_nodes , in_degree = get_topo(graph_module.graph.nodes)
 
-    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, alpha)
+    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, alpha, selection_mode, time_domain)
 
     # for stream in all_streams:
     #     print(stream)

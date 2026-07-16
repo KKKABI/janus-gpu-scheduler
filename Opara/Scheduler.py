@@ -105,10 +105,11 @@ class VirtualSM:
 # -------------------------------
 
 class ResourceModel:
-    def __init__(self, sm_count: int, sm_specs: dict):
+    def __init__(self, sm_count: int, sm_specs: dict, time_domain=True):
         self.sms = [VirtualSM(**sm_specs) for _ in range(sm_count)]
         self.current_time = 0.0
         self.pending_kernels = []
+        self.time_domain = time_domain
 
     def update_time(self, current_time: float):
         for sm in self.sms:
@@ -116,57 +117,66 @@ class ResourceModel:
         self.current_time = current_time
 
     def can_apply_launch(self, operator: OperatorTask, start_time: float)-> bool:
-        """时域仿真可行性检查。
-
-        不要求所有 block 同时驻留在 SM 上，而是模拟时间推进：
-        block 跑完后释放资源，新 block 再上。更接近真实 GPU 行为。
-        """
         virtual_sms = copy.deepcopy(self.sms)
         virtual_operator = copy.deepcopy(operator)
         kernel = virtual_operator.kernels[0]
-        current_time = start_time
-        MAX_ITER = 2000
 
-        for _ in range(MAX_ITER):
-            # 尝试在当前时刻尽可能多地塞 block
+        if not self.time_domain:
+            # 原始静态分配：所有 block 必须同时驻留
             while kernel.has_pending_blocks():
                 block_resource = {
                     'shared_mem': kernel.shared_mem,
                     'registers': kernel.registers,
                     'warps': kernel.warps
                 }
-
                 sm_capacities = []
                 for sm in virtual_sms:
                     max_blocks = sm.max_blocks_fit(block_resource)
                     if max_blocks > 0:
                         sm_capacities.append((max_blocks, sm))
-
                 if not sm_capacities:
-                    break  # 当前时刻塞不下了，需要推进时间
+                    break
+                _, selected_sm = max(sm_capacities, key=lambda x: x[0])
+                selected_sm.allocate_block(kernel.name, block_resource, start_time, kernel.duration)
+                kernel.allocate_block()
+            return not kernel.has_pending_blocks()
 
+        # 时域仿真：推进时间释放已完成 block 再重试
+        current_time = start_time
+        MAX_ITER = 2000
+        for _ in range(MAX_ITER):
+            while kernel.has_pending_blocks():
+                block_resource = {
+                    'shared_mem': kernel.shared_mem,
+                    'registers': kernel.registers,
+                    'warps': kernel.warps
+                }
+                sm_capacities = []
+                for sm in virtual_sms:
+                    max_blocks = sm.max_blocks_fit(block_resource)
+                    if max_blocks > 0:
+                        sm_capacities.append((max_blocks, sm))
+                if not sm_capacities:
+                    break
                 _, selected_sm = max(sm_capacities, key=lambda x: x[0])
                 selected_sm.allocate_block(kernel.name, block_resource, current_time, kernel.duration)
                 kernel.allocate_block()
 
             if not kernel.has_pending_blocks():
-                return True  # 全部 block 分配完成
+                return True
 
-            # 推进时间到最早结束的 block，释放资源
             min_end_time = None
             for sm in virtual_sms:
                 for end_time, _, _ in sm.running_blocks:
                     if min_end_time is None or end_time < min_end_time:
                         min_end_time = end_time
-
             if min_end_time is None or min_end_time <= current_time:
-                return False  # 没有 block 在跑，且无法塞新的 → 死锁
-
+                return False
             current_time = min_end_time
             for sm in virtual_sms:
                 sm.release_finished_blocks(current_time)
 
-        return False  # 超过最大迭代次数
+        return False
             
     def apply_launch(self, operator: OperatorTask, start_time: float):
         kernel = operator.kernels[0]
@@ -286,9 +296,11 @@ def dump_candidate_stats():
 
 
 class Scheduler:
-    def __init__(self, resource_model, alpha=0.9):
+    def __init__(self, resource_model, alpha=0.9, selection_mode='cosine', time_domain=True):
         self.resource_model = resource_model
         self.alpha = alpha
+        self.selection_mode = selection_mode  # 'cosine' | 'min_resource' | 'max_occupancy'
+        self.time_domain = time_domain
 
     def schedule(self, ready_ops: List["OperatorTask"], current_time: float) -> List["OperatorTask"]:
 
@@ -344,72 +356,87 @@ class Scheduler:
             best_combo = max(combo_scores, key=lambda x: x[1])[0]
             return best_combo
 
-        # ===== Direction B: 基于 profile 数据的资源多样度打分 =====
-        def resource_diversity_score(combo):
-            """
-            计算组合内算子的资源使用多样度。
-            分数越低 → 算子的资源需求互补性越好 → interference 越少。
-            对 size=1 的组合返回 0（单个算子无 interference 问题）。
-            """
-            if len(combo) <= 1:
-                return 0.0
+        # ===== 选择策略 =====
+        if self.selection_mode == 'max_occupancy':
+            # 纯最大占用率（基线）
+            best_combo = max(top_candidates, key=lambda c: next(s for cc, s in combo_scores if cc is c))
+            return best_combo
 
-            # 构建每个算子的资源特征向量（per-block 平均）
-            profiles = []
-            for op in combo:
-                reg = 0.0
-                smem = 0.0
-                warps = 0.0
-                dur = 0.0
-                blocks = 0
-                for k in op.kernels:
-                    # registers 已在 OperatorLauncher 中计算为 regs_per_thread * threads_per_block（per-block 值）
-                    reg += k.registers * k.blocks
-                    smem += k.shared_mem * k.blocks
-                    warps += k.warps * k.blocks
-                    dur += k.duration * k.blocks
-                    blocks += k.blocks
-                if blocks > 0:
-                    profiles.append([reg / blocks, smem / blocks, warps / blocks, dur / blocks])
-                else:
-                    profiles.append([0.0, 0.0, 0.0, 0.0])
+        elif self.selection_mode == 'min_resource':
+            # 资源加和策略：选总资源压力最小的组合
+            # 对每个组合计算三大资源的全局占用比例，取最均衡（max 压力最小）的
+            N_SM = len(self.resource_model.sms)
+            REG_CAP = 65536.0 * N_SM
+            SMEM_CAP = 102400.0 * N_SM
+            WARP_CAP = 48.0 * N_SM
 
-            # 每维 min-max 归一化
-            n_dims = 4
-            for d in range(n_dims):
-                vals = [p[d] for p in profiles]
-                vmin, vmax = min(vals), max(vals)
-                if vmax > vmin:
-                    for p in profiles:
-                        p[d] = (p[d] - vmin) / (vmax - vmin)
-                else:
-                    for p in profiles:
-                        p[d] = 0.5
+            def min_resource_score(combo):
+                if len(combo) <= 1:
+                    return 0.0
+                total_reg = 0.0; total_smem = 0.0; total_warps = 0.0
+                for op in combo:
+                    for k in op.kernels:
+                        total_reg += k.registers * k.blocks
+                        total_smem += k.shared_mem * k.blocks
+                        total_warps += k.warps * k.blocks
+                p_reg = total_reg / REG_CAP
+                p_smem = total_smem / SMEM_CAP
+                p_warp = total_warps / WARP_CAP
+                # 返回平均压力 + 最大压力（惩罚不均衡）
+                return (p_reg + p_smem + p_warp) / 3.0 + max(p_reg, p_smem, p_warp)
 
-            # 两两计算余弦相似度
-            total_sim = 0.0
-            pairs = 0
-            for i in range(len(profiles)):
-                for j in range(i + 1, len(profiles)):
-                    dot = sum(profiles[i][d] * profiles[j][d] for d in range(n_dims))
-                    ni = sum(profiles[i][d] ** 2 for d in range(n_dims)) ** 0.5
-                    nj = sum(profiles[j][d] ** 2 for d in range(n_dims)) ** 0.5
-                    if ni > 0 and nj > 0:
-                        total_sim += dot / (ni * nj)
+            def combo_sort_key_minres(combo):
+                score = min_resource_score(combo)
+                occ = next(s for c, s in combo_scores if c is combo)
+                return (score, -occ)
+
+            best_combo = min(top_candidates, key=combo_sort_key_minres)
+            return best_combo
+
+        else:  # 'cosine' — Direction B 余弦相似度
+            def resource_diversity_score(combo):
+                if len(combo) <= 1:
+                    return 0.0
+                profiles = []
+                for op in combo:
+                    reg = 0.0; smem = 0.0; warps = 0.0; dur = 0.0; blocks = 0
+                    for k in op.kernels:
+                        reg += k.registers * k.blocks
+                        smem += k.shared_mem * k.blocks
+                        warps += k.warps * k.blocks
+                        dur += k.duration * k.blocks
+                        blocks += k.blocks
+                    if blocks > 0:
+                        profiles.append([reg / blocks, smem / blocks, warps / blocks, dur / blocks])
                     else:
-                        total_sim += 1.0  # 零向量 → 无法区分
-                    pairs += 1
+                        profiles.append([0.0, 0.0, 0.0, 0.0])
+                n_dims = 4
+                for d in range(n_dims):
+                    vals = [p[d] for p in profiles]
+                    vmin, vmax = min(vals), max(vals)
+                    if vmax > vmin:
+                        for p in profiles:
+                            p[d] = (p[d] - vmin) / (vmax - vmin)
+                    else:
+                        for p in profiles:
+                            p[d] = 0.5
+                total_sim = 0.0; pairs = 0
+                for i in range(len(profiles)):
+                    for j in range(i + 1, len(profiles)):
+                        dot = sum(profiles[i][d] * profiles[j][d] for d in range(n_dims))
+                        ni = sum(profiles[i][d] ** 2 for d in range(n_dims)) ** 0.5
+                        nj = sum(profiles[j][d] ** 2 for d in range(n_dims)) ** 0.5
+                        total_sim += dot / (ni * nj) if ni > 0 and nj > 0 else 1.0
+                        pairs += 1
+                return total_sim / pairs if pairs > 0 else 1.0
 
-            return total_sim / pairs if pairs > 0 else 1.0
+            def combo_sort_key(combo):
+                sim = resource_diversity_score(combo)
+                occ = next(s for c, s in combo_scores if c is combo)
+                return (sim, -occ)
 
-        def combo_sort_key(combo):
-            sim = resource_diversity_score(combo)
-            occ = next(s for c, s in combo_scores if c is combo)
-            return (sim, -occ)
-
-        # 选资源多样度最高（相似度最低）的组合，同分时选占用率高的
-        best_combo = min(top_candidates, key=combo_sort_key)
-        return best_combo
+            best_combo = min(top_candidates, key=combo_sort_key)
+            return best_combo
 
 
 

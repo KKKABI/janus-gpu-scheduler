@@ -116,39 +116,57 @@ class ResourceModel:
         self.current_time = current_time
 
     def can_apply_launch(self, operator: OperatorTask, start_time: float)-> bool:
+        """时域仿真可行性检查。
+
+        不要求所有 block 同时驻留在 SM 上，而是模拟时间推进：
+        block 跑完后释放资源，新 block 再上。更接近真实 GPU 行为。
+        """
         virtual_sms = copy.deepcopy(self.sms)
         virtual_operator = copy.deepcopy(operator)
         kernel = virtual_operator.kernels[0]
-        
-        while kernel.has_pending_blocks():
-            block_resource = {
-                'shared_mem': kernel.shared_mem,
-                'registers': kernel.registers,
-                'warps': kernel.warps
-            }
+        current_time = start_time
+        MAX_ITER = 2000
 
-            # 计算每个 SM 当前可容纳的最大线程块数
-            sm_capacities = []
+        for _ in range(MAX_ITER):
+            # 尝试在当前时刻尽可能多地塞 block
+            while kernel.has_pending_blocks():
+                block_resource = {
+                    'shared_mem': kernel.shared_mem,
+                    'registers': kernel.registers,
+                    'warps': kernel.warps
+                }
+
+                sm_capacities = []
+                for sm in virtual_sms:
+                    max_blocks = sm.max_blocks_fit(block_resource)
+                    if max_blocks > 0:
+                        sm_capacities.append((max_blocks, sm))
+
+                if not sm_capacities:
+                    break  # 当前时刻塞不下了，需要推进时间
+
+                _, selected_sm = max(sm_capacities, key=lambda x: x[0])
+                selected_sm.allocate_block(kernel.name, block_resource, current_time, kernel.duration)
+                kernel.allocate_block()
+
+            if not kernel.has_pending_blocks():
+                return True  # 全部 block 分配完成
+
+            # 推进时间到最早结束的 block，释放资源
+            min_end_time = None
             for sm in virtual_sms:
-                max_blocks = sm.max_blocks_fit(block_resource)
-                if max_blocks > 0:
-                    sm_capacities.append((max_blocks, sm))
+                for end_time, _, _ in sm.running_blocks:
+                    if min_end_time is None or end_time < min_end_time:
+                        min_end_time = end_time
 
-            if not sm_capacities:
-                break  # 没有 SM 可以容纳该线程块
+            if min_end_time is None or min_end_time <= current_time:
+                return False  # 没有 block 在跑，且无法塞新的 → 死锁
 
-            # 选择可容纳线程块数最多的 SM
-            _, selected_sm = max(sm_capacities, key=lambda x: x[0])
+            current_time = min_end_time
+            for sm in virtual_sms:
+                sm.release_finished_blocks(current_time)
 
-            # 分配一个线程块
-            selected_sm.allocate_block(kernel.name, block_resource, start_time, kernel.duration)
-            kernel.allocate_block()
-
-            # 更新 pending_kernels 列表
-        if kernel.has_pending_blocks():
-            return False
-        else:
-            return True
+        return False  # 超过最大迭代次数
             
     def apply_launch(self, operator: OperatorTask, start_time: float):
         kernel = operator.kernels[0]
@@ -241,12 +259,39 @@ class ResourceModel:
 # -------------------------------
 # 爆搜
 # ---
+
+# 全局统计：每次 schedule() 调用时不同 alpha 下的候选组合数
+_CANDIDATE_STATS = []  # list of dict: {total, alpha_0.9, alpha_0.8, alpha_0.5, alpha_0.2, occ_max}
+
+def dump_candidate_stats():
+    """打印候选组合统计汇总"""
+    if not _CANDIDATE_STATS:
+        return
+    print("\n" + "=" * 70)
+    print("  CANDIDATE COMBO STATS (Direction B scheduler)")
+    print("=" * 70)
+    print(f"  {'call':>5} {'total':>7} {'a=0.9':>7} {'a=0.8':>7} {'a=0.5':>7} {'a=0.2':>7} {'occ_max':>8}")
+    print("  " + "-" * 52)
+    for i, s in enumerate(_CANDIDATE_STATS):
+        print(f"  {i:>5} {s['total']:>7} {s['a=0.9']:>7} {s['a=0.8']:>7} {s['a=0.5']:>7} {s['a=0.2']:>7} {s['occ_max']:>7.4f}")
+    # 汇总
+    total_all = sum(s['total'] for s in _CANDIDATE_STATS)
+    n_calls = len(_CANDIDATE_STATS)
+    for a in ['a=0.9', 'a=0.8', 'a=0.5', 'a=0.2']:
+        n_single = sum(1 for s in _CANDIDATE_STATS if s[a] == 1)
+        avg = sum(s[a] for s in _CANDIDATE_STATS) / n_calls
+        print(f"  {a}: avg={avg:.1f}, only_1_combo={n_single}/{n_calls} ({100*n_single/n_calls:.0f}%)")
+    print("=" * 70)
+    _CANDIDATE_STATS.clear()
+
+
 class Scheduler:
-    def __init__(self, resource_model):
+    def __init__(self, resource_model, alpha=0.9):
         self.resource_model = resource_model
+        self.alpha = alpha
 
     def schedule(self, ready_ops: List["OperatorTask"], current_time: float) -> List["OperatorTask"]:
-       
+
         self.resource_model.update_time(current_time)
         # 枚举所有候选组合并计算每个组合的 SM 占用率（occupancy）
         combo_scores = []  # list of (combo_list, occupancy_score)
@@ -281,8 +326,16 @@ class Scheduler:
         # 找到最大占用率
         occ_max = max(score for _, score in combo_scores)
 
+        # 统计不同 alpha 下的候选组合数
+        total_feasible = sum(1 for _, s in combo_scores if s >= 0)
+        stats = {'total': total_feasible, 'occ_max': occ_max}
+        for a_label, a_val in [('a=0.9', 0.9), ('a=0.8', 0.8), ('a=0.5', 0.5), ('a=0.2', 0.2)]:
+            cnt = sum(1 for _, s in combo_scores if s >= a_val * occ_max)
+            stats[a_label] = cnt
+        _CANDIDATE_STATS.append(stats)
+
         # alpha 控制保留阈值
-        alpha = 0.9
+        alpha = self.alpha
         top_candidates = [combo for combo, score in combo_scores if score >= alpha * occ_max]
 
         # 如果没有满足阈值的候选，则退回到单纯的最大占用组合

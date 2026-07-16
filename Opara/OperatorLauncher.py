@@ -119,7 +119,7 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
 
 
 
-def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width):
+def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width, alpha=0.9):
 
     sm_specs = {
         'shared_mem_total': sharedMemPerMultiprocessor,
@@ -127,7 +127,7 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
         'warp_total': maxThreadsPerMultiprocessor//32
     }
     resource_model = ResourceModel(sm_count=numSms, sm_specs=sm_specs)
-    scheduler = Scheduler(resource_model)
+    scheduler = Scheduler(resource_model, alpha)
     current_time = 0.0
 
     
@@ -241,6 +241,8 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
                 in_degree[user] -= 1
                 if in_degree[user] == 0:
                     queue.append(user)
+        from Opara.Scheduler import dump_candidate_stats
+        dump_candidate_stats()
     return result
     
     
@@ -339,7 +341,7 @@ def get_topo(fx_nodes):
            in_degree[node] += 1
     return nodes , in_degree
 
-def recompile(model_class_name, graph_module, inputs, all_streams, max_width):
+def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9):
     
     path = os.path.abspath(os.path.dirname(__file__))
     # model_class_name = graph_module.__class__.__name__
@@ -361,8 +363,8 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width):
 
     torch_nodes , in_degree = get_topo(graph_module.graph.nodes)
 
-    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width)
-    
+    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, alpha)
+
     # for stream in all_streams:
     #     print(stream)
         

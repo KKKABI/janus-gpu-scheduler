@@ -221,3 +221,102 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
             return static_outputs
 
     return run
+
+def autotune_capturer(
+    inputs,
+    model,
+    copy_outputs: bool = False,
+    candidates=None,
+    warmups: int = 20,
+    iterations: int = 100,
+    repeats: int = 3,
+):
+    """Capture several static schedules and retain the fastest measured graph.
+
+    Tuning happens once, before deployment. The returned callable replays only
+    the selected CUDA Graph, so there is no online scheduling or graph switch.
+    """
+    import statistics
+
+    if candidates is None:
+        candidates = [
+            {
+                "name": "max_occupancy",
+                "selection_mode": "max_occupancy",
+                "overload_weight": "1.0",
+                "tail_weight": "0.02",
+                "occupancy_weight": "0.005",
+            },
+            {
+                "name": "dominant_resource_time",
+                "selection_mode": "static_interference",
+                "overload_weight": "1.0",
+                "tail_weight": "0.02",
+                "occupancy_weight": "0.005",
+            },
+        ]
+
+    env_names = (
+        "JANUS_SELECTION_MODE",
+        "JANUS_OVERLOAD_WEIGHT",
+        "JANUS_TAIL_WEIGHT",
+        "JANUS_OCCUPANCY_WEIGHT",
+    )
+    old_env = {name: os.environ.get(name) for name in env_names}
+    best_runner = None
+    best_name = None
+    best_latency = float("inf")
+    measurements = {}
+
+    try:
+        for config in candidates:
+            os.environ["JANUS_SELECTION_MODE"] = config["selection_mode"]
+            os.environ["JANUS_OVERLOAD_WEIGHT"] = config.get("overload_weight", "1.0")
+            os.environ["JANUS_TAIL_WEIGHT"] = config.get("tail_weight", "0.02")
+            os.environ["JANUS_OCCUPANCY_WEIGHT"] = config.get("occupancy_weight", "0.005")
+
+            runner = capturer(
+                inputs,
+                model,
+                copy_outputs=copy_outputs,
+                alpha=float(config.get("alpha", 0.9)),
+                selection_mode=config["selection_mode"],
+                time_domain=bool(config.get("time_domain", True)),
+            )
+            for _ in range(warmups):
+                runner(*inputs)
+            torch.cuda.synchronize()
+
+            samples = []
+            for _ in range(repeats):
+                start = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+                start.record()
+                for _ in range(iterations):
+                    runner(*inputs)
+                end.record()
+                torch.cuda.synchronize()
+                samples.append(start.elapsed_time(end) / iterations)
+
+            latency = statistics.median(samples)
+            name = config["name"]
+            measurements[name] = {"median_ms": latency, "samples_ms": samples}
+            print(f"[autotune] {name}: median={latency:.6f} ms samples={samples}")
+
+            if latency < best_latency:
+                best_latency = latency
+                best_name = name
+                best_runner = runner
+
+        if best_runner is None:
+            raise RuntimeError("No static schedule candidate was captured")
+        best_runner.janus_schedule = best_name
+        best_runner.janus_tuning_measurements = measurements
+        print(f"[autotune] selected {best_name}: {best_latency:.6f} ms")
+        return best_runner
+    finally:
+        for name, value in old_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value

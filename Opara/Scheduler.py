@@ -1,5 +1,6 @@
 from typing import List
 import copy
+import os
 from itertools import combinations
 
 
@@ -299,8 +300,107 @@ class Scheduler:
     def __init__(self, resource_model, alpha=0.9, selection_mode='cosine', time_domain=True):
         self.resource_model = resource_model
         self.alpha = alpha
-        self.selection_mode = selection_mode  # 'cosine' | 'min_resource' | 'max_occupancy'
+        self.selection_mode = os.getenv('JANUS_SELECTION_MODE', selection_mode)
+        self.overload_weight = float(os.getenv('JANUS_OVERLOAD_WEIGHT', '1.0'))
+        self.tail_weight = float(os.getenv('JANUS_TAIL_WEIGHT', '0.02'))
+        self.occupancy_weight = float(os.getenv('JANUS_OCCUPANCY_WEIGHT', '0.005'))
         self.time_domain = time_domain
+        self._static_profile_cache = {}
+
+    def _select_static_interference(self, ready_ops, combo_scores):
+        """Predict round-time gain from magnitude-aware static pressure."""
+        feasible = [(combo, occ) for combo, occ in combo_scores if occ >= 0]
+        if not feasible:
+            return []
+
+        n_sms = max(1, len(self.resource_model.sms))
+        sample_sm = self.resource_model.sms[0]
+        reg_cap = float(max(1, sample_sm.register_total))
+        smem_cap = float(max(1, sample_sm.shared_mem_total))
+        warp_cap = float(max(1, sample_sm.warp_total))
+
+        profiles = {}
+        raw_densities = {}
+        for op in ready_ops:
+            kernels = [k for k in op.kernels if k.blocks > 0]
+            cached = self._static_profile_cache.get(op.name)
+            if cached is not None:
+                profiles[op.name], raw_densities[op.name] = cached
+                continue
+
+            duration = sum(max(float(k.duration), 1e-9) for k in kernels)
+            if not kernels:
+                profiles[op.name] = (1e-9, [0.0, 0.0, 0.0, 0.0])
+                raw_densities[op.name] = 0.0
+                self._static_profile_cache[op.name] = (profiles[op.name], 0.0)
+                continue
+
+            # Resource-time demand includes whole-GPU residency, so two
+            # kernels spanning every SM are not treated as complementary
+            # merely because their register/shared-memory mix differs.
+            pressure = [0.0, 0.0, 0.0, 0.0]
+            total_blocks = 0.0
+            for k in kernels:
+                weight = max(float(k.duration), 1e-9) / duration
+                fit_reg = int(reg_cap // k.registers) if k.registers > 0 else 32
+                fit_smem = int(smem_cap // k.shared_mem) if k.shared_mem > 0 else 32
+                fit_warp = int(warp_cap // k.warps) if k.warps > 0 else 32
+                blocks_per_sm = max(1, min(32, fit_reg, fit_smem, fit_warp))
+                coverage = min(1.0, float(k.blocks) / (n_sms * blocks_per_sm))
+                resident = [
+                    min(1.0, blocks_per_sm * k.registers / reg_cap) * coverage,
+                    min(1.0, blocks_per_sm * k.shared_mem / smem_cap) * coverage,
+                    min(1.0, blocks_per_sm * k.warps / warp_cap) * coverage,
+                    coverage,
+                ]
+                for dim in range(4):
+                    pressure[dim] += weight * resident[dim]
+                total_blocks += float(k.blocks)
+
+            profiles[op.name] = (duration, pressure)
+            raw_densities[op.name] = duration / max(total_blocks, 1.0)
+            self._static_profile_cache[op.name] = (
+                profiles[op.name], raw_densities[op.name])
+
+        density_scale = max(max(raw_densities.values(), default=0.0), 1e-9)
+
+        def candidate_score(item):
+            combo, occupancy = item
+            durations = []
+            vectors = []
+            for op in combo:
+                duration, pressure = profiles.get(op.name, (1e-9, [0.0, 0.0, 0.0, 0.0]))
+                density = min(1.0, raw_densities.get(op.name, 0.0) / density_scale)
+                durations.append(duration)
+                vectors.append(pressure + [density])
+
+            sequential = max(sum(durations), 1e-9)
+            ideal_round = max(durations)
+            # Convert instantaneous pressure into resource-time demand. A
+            # short op contends only for its share of the longest op's
+            # lifetime; the dominant demand predicts round-time inflation.
+            summed = [
+                sum(
+                    v[d] * durations[i] / max(ideal_round, 1e-9)
+                    for i, v in enumerate(vectors)
+                )
+                for d in range(5)
+            ]
+            overload = max(0.0, max(summed) - 1.0)
+            predicted_round = ideal_round * (1.0 + self.overload_weight * overload)
+            gain = (sequential - predicted_round) / sequential
+
+            mean_duration = sequential / len(durations)
+            variance = sum((d - mean_duration) ** 2 for d in durations) / len(durations)
+            tail = (variance ** 0.5) / max(mean_duration, 1e-9)
+            score = (
+                gain
+                - self.tail_weight * tail
+                + self.occupancy_weight * max(0.0, occupancy)
+            )
+            return (score, -overload, -predicted_round, -len(combo), occupancy)
+
+        return max(feasible, key=candidate_score)[0]
 
     def schedule(self, ready_ops: List["OperatorTask"], current_time: float) -> List["OperatorTask"]:
 
@@ -337,6 +437,9 @@ class Scheduler:
 
         # 找到最大占用率
         occ_max = max(score for _, score in combo_scores)
+
+        if self.selection_mode == 'static_interference':
+            return self._select_static_interference(ready_ops, combo_scores)
 
         # 统计不同 alpha 下的候选组合数
         total_feasible = sum(1 for _, s in combo_scores if s >= 0)

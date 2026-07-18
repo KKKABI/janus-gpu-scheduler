@@ -229,13 +229,16 @@ def autotune_capturer(
     candidates=None,
     warmups: int = 20,
     iterations: int = 100,
-    repeats: int = 3,
+    repeats: int = 5,
+    min_relative_improvement: float = 0.01,
+    confidence_multiplier: float = 2.0,
 ):
     """Capture several static schedules and retain the fastest measured graph.
 
     Tuning happens once, before deployment. The returned callable replays only
     the selected CUDA Graph, so there is no online scheduling or graph switch.
     """
+    import math
     import statistics
 
     if candidates is None:
@@ -263,12 +266,12 @@ def autotune_capturer(
         "JANUS_OCCUPANCY_WEIGHT",
     )
     old_env = {name: os.environ.get(name) for name in env_names}
-    best_runner = None
-    best_name = None
-    best_latency = float("inf")
+    runners = []
     measurements = {}
 
     try:
+        # Capture every candidate first. Measuring a candidate immediately after
+        # its capture biases later candidates through clock/temperature drift.
         for config in candidates:
             os.environ["JANUS_SELECTION_MODE"] = config["selection_mode"]
             os.environ["JANUS_OVERLOAD_WEIGHT"] = config.get("overload_weight", "1.0")
@@ -283,12 +286,23 @@ def autotune_capturer(
                 selection_mode=config["selection_mode"],
                 time_domain=bool(config.get("time_domain", True)),
             )
-            for _ in range(warmups):
-                runner(*inputs)
-            torch.cuda.synchronize()
+            runners.append((config, runner))
 
-            samples = []
-            for _ in range(repeats):
+        if not runners:
+            raise RuntimeError("No static schedule candidate was captured")
+
+        # Interleave both warmup and timing order (AB/BA/AB/...) so all graphs
+        # see approximately the same GPU clock and thermal conditions.
+        for warmup_index in range(warmups):
+            order = runners if warmup_index % 2 == 0 else reversed(runners)
+            for _, runner in order:
+                runner(*inputs)
+        torch.cuda.synchronize()
+
+        samples_by_name = {config["name"]: [] for config, _ in runners}
+        for repeat_index in range(repeats):
+            order = runners if repeat_index % 2 == 0 else list(reversed(runners))
+            for config, runner in order:
                 start = torch.cuda.Event(enable_timing=True)
                 end = torch.cuda.Event(enable_timing=True)
                 start.record()
@@ -296,20 +310,56 @@ def autotune_capturer(
                     runner(*inputs)
                 end.record()
                 torch.cuda.synchronize()
-                samples.append(start.elapsed_time(end) / iterations)
+                samples_by_name[config["name"]].append(
+                    start.elapsed_time(end) / iterations
+                )
 
-            latency = statistics.median(samples)
+        runner_by_name = {}
+        for config, runner in runners:
             name = config["name"]
-            measurements[name] = {"median_ms": latency, "samples_ms": samples}
+            samples = samples_by_name[name]
+            latency = statistics.median(samples)
+            mad = statistics.median(abs(sample - latency) for sample in samples)
+            measurements[name] = {
+                "median_ms": latency,
+                "mad_ms": mad,
+                "samples_ms": samples,
+            }
+            runner_by_name[name] = runner
             print(f"[autotune] {name}: median={latency:.6f} ms samples={samples}")
 
-            if latency < best_latency:
-                best_latency = latency
+        # The first candidate is the conservative baseline. A different graph
+        # replaces it only when its gain clears both a relative threshold and a
+        # robust MAD-derived noise margin. This preserves large DRT wins while
+        # preventing sub-percent benchmark noise from causing regressions.
+        baseline_name = runners[0][0]["name"]
+        baseline = measurements[baseline_name]
+        best_name = baseline_name
+        best_latency = baseline["median_ms"]
+        for config, _ in runners[1:]:
+            name = config["name"]
+            candidate = measurements[name]
+            improvement_ms = baseline["median_ms"] - candidate["median_ms"]
+            robust_sigma = 1.4826 * math.sqrt(
+                baseline["mad_ms"] ** 2 + candidate["mad_ms"] ** 2
+            ) / math.sqrt(max(repeats, 1))
+            required_ms = max(
+                baseline["median_ms"] * min_relative_improvement,
+                confidence_multiplier * robust_sigma,
+            )
+            candidate["improvement_vs_baseline_ms"] = improvement_ms
+            candidate["required_improvement_ms"] = required_ms
+            candidate["eligible"] = improvement_ms > required_ms
+            print(
+                f"[autotune] {name} vs {baseline_name}: "
+                f"gain={improvement_ms:.6f} ms required={required_ms:.6f} ms "
+                f"eligible={candidate['eligible']}"
+            )
+            if candidate["eligible"] and candidate["median_ms"] < best_latency:
+                best_latency = candidate["median_ms"]
                 best_name = name
-                best_runner = runner
 
-        if best_runner is None:
-            raise RuntimeError("No static schedule candidate was captured")
+        best_runner = runner_by_name[best_name]
         best_runner.janus_schedule = best_name
         best_runner.janus_tuning_measurements = measurements
         print(f"[autotune] selected {best_name}: {best_latency:.6f} ms")

@@ -9,7 +9,8 @@ from itertools import combinations
 # -------------------------------
 
 class KernelProfile:
-    def __init__(self, name: str, duration: float, shared_mem: int, registers: int, warps: int, blocks: int):
+    def __init__(self, name: str, duration: float, shared_mem: int, registers: int, warps: int, blocks: int,
+                 mem_thru=0.0, dram_thru=0.0, l2_thru=0.0, comp_thru=0.0):
         self.name = name
         self.duration = duration
         self.shared_mem = shared_mem
@@ -17,6 +18,10 @@ class KernelProfile:
         self.warps = warps
         self.blocks = blocks
         self.blocks_remaining = blocks
+        self.mem_thru = mem_thru
+        self.dram_thru = dram_thru
+        self.l2_thru = l2_thru
+        self.comp_thru = comp_thru
 
     def has_pending_blocks(self) -> bool:
         return self.blocks_remaining > 0
@@ -356,15 +361,52 @@ class Scheduler:
             best_combo = max(combo_scores, key=lambda x: x[1])[0]
             return best_combo
 
+        # ===== 检查是否有 ncu memory 数据 =====
+        _has_ncu = any(
+            hasattr(op, 'kernels') and op.kernels and
+            hasattr(op.kernels[0], 'mem_thru') and getattr(op.kernels[0], 'mem_thru', 0) > 0
+            for op in ready_ops
+        )
+
         # ===== 选择策略 =====
         if self.selection_mode == 'max_occupancy':
-            # 纯最大占用率（基线）
             best_combo = max(top_candidates, key=lambda c: next(s for cc, s in combo_scores if cc is c))
+            return best_combo
+
+        elif self.selection_mode == 'memory_aware':
+            # Memory-aware 策略：避免两个高 DRAM 算子放一起
+            # 评分 = 占用率奖励 - 内存冲突惩罚
+            def memory_aware_score(combo):
+                if len(combo) <= 1:
+                    return 0.0
+                occ = next((s for c, s in combo_scores if c is combo), 0)
+
+                # 计算组合内算子的平均 DRAM 吞吐量和最大 DRAM 吞吐量
+                dram_vals = []
+                for op in combo:
+                    for k in op.kernels:
+                        d = getattr(k, 'dram_thru', 0)
+                        if d > 0:
+                            dram_vals.append(d)
+                if not dram_vals:
+                    return -occ  # 无 ncu 数据 → 退化为纯占用率
+
+                avg_dram = sum(dram_vals) / len(dram_vals)
+                max_dram = max(dram_vals)
+
+                # 冲突惩罚：两个高 DRAM 算子在一起 → 惩罚
+                penalty = 0.0
+                high_dram_count = sum(1 for d in dram_vals if d > 30)
+                if high_dram_count >= 2:
+                    penalty = max_dram * 0.01  # 越高的 DRAM 冲突越严重
+
+                return occ - penalty
+
+            best_combo = max(top_candidates, key=memory_aware_score)
             return best_combo
 
         elif self.selection_mode == 'min_resource':
             # 资源加和策略：选总资源压力最小的组合
-            # 对每个组合计算三大资源的全局占用比例，取最均衡（max 压力最小）的
             N_SM = len(self.resource_model.sms)
             REG_CAP = 65536.0 * N_SM
             SMEM_CAP = 102400.0 * N_SM
@@ -393,24 +435,34 @@ class Scheduler:
             best_combo = min(top_candidates, key=combo_sort_key_minres)
             return best_combo
 
-        else:  # 'cosine' — Direction B 余弦相似度
+        else:  # 'cosine' — 余弦相似度（自动扩展维度）
             def resource_diversity_score(combo):
                 if len(combo) <= 1:
                     return 0.0
                 profiles = []
                 for op in combo:
                     reg = 0.0; smem = 0.0; warps = 0.0; dur = 0.0; blocks = 0
+                    mem = 0.0; dram = 0.0; l2 = 0.0; comp = 0.0
                     for k in op.kernels:
                         reg += k.registers * k.blocks
                         smem += k.shared_mem * k.blocks
                         warps += k.warps * k.blocks
                         dur += k.duration * k.blocks
                         blocks += k.blocks
+                        if _has_ncu:
+                            mem += getattr(k, 'mem_thru', 0.0) * k.blocks
+                            dram += getattr(k, 'dram_thru', 0.0) * k.blocks
+                            l2 += getattr(k, 'l2_thru', 0.0) * k.blocks
+                            comp += getattr(k, 'comp_thru', 0.0) * k.blocks
                     if blocks > 0:
-                        profiles.append([reg / blocks, smem / blocks, warps / blocks, dur / blocks])
+                        vec = [reg/blocks, smem/blocks, warps/blocks, dur/blocks]
+                        if _has_ncu:
+                            vec += [dram/blocks, l2/blocks, comp/blocks]
+                        profiles.append(vec)
                     else:
-                        profiles.append([0.0, 0.0, 0.0, 0.0])
-                n_dims = 4
+                        n = 7 if _has_ncu else 4
+                        profiles.append([0.0] * n)
+                n_dims = len(profiles[0])
                 for d in range(n_dims):
                     vals = [p[d] for p in profiles]
                     vmin, vmax = min(vals), max(vals)

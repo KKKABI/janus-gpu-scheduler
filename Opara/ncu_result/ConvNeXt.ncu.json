@@ -1,0 +1,142 @@
+{
+  "ampere_sgemm_128x32_sliced1x4_tn": {
+    "mem_thru": 55.86,
+    "dram_thru": 34.13,
+    "l2_thru": 32.41,
+    "comp_thru": 52.99,
+    "dur_ns": 74197.33
+  },
+  "ampere_sgemm_128x32_tn": {
+    "mem_thru": 71.2,
+    "dram_thru": 36.28,
+    "l2_thru": 48.28,
+    "comp_thru": 65.75,
+    "dur_ns": 81280.0
+  },
+  "ampere_sgemm_128x64_tn": {
+    "mem_thru": 43.12,
+    "dram_thru": 14.27,
+    "l2_thru": 27.3,
+    "comp_thru": 47.38,
+    "dur_ns": 68149.33
+  },
+  "ampere_sgemm_32x128_tn": {
+    "mem_thru": 49.88,
+    "dram_thru": 12.56,
+    "l2_thru": 25.69,
+    "comp_thru": 46.59,
+    "dur_ns": 88757.33
+  },
+  "ampere_sgemm_64x64_tn": {
+    "mem_thru": 39.07,
+    "dram_thru": 8.76,
+    "l2_thru": 24.81,
+    "comp_thru": 40.27,
+    "dur_ns": 77365.33
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f": {
+    "mem_thru": 48.04,
+    "dram_thru": 48.04,
+    "l2_thru": 33.6,
+    "comp_thru": 31.17,
+    "dur_ns": 28320.0
+  },
+  "sm86_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nhwck": {
+    "mem_thru": 49.85,
+    "dram_thru": 15.63,
+    "l2_thru": 49.85,
+    "comp_thru": 28.65,
+    "dur_ns": 25632.0
+  },
+  "std::enable_if<!T7, void>::type internal::kernel<int, i": {
+    "mem_thru": 80.52,
+    "dram_thru": 21.44,
+    "l2_thru": 10.39,
+    "comp_thru": 8.84,
+    "dur_ns": 26912.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 6.9,
+    "dram_thru": 0.46,
+    "l2_thru": 5.06,
+    "comp_thru": 47.42,
+    "dur_ns": 7808.0
+  },
+  "void at::<unnamed>::vectorized_layer_norm_kernel<float,": {
+    "mem_thru": 44.18,
+    "dram_thru": 12.32,
+    "l2_thru": 9.48,
+    "comp_thru": 46.77,
+    "dur_ns": 22086.4
+  },
+  "void at::elementwise_kernel<128, 2, void at::gpu_kernel": {
+    "mem_thru": 85.18,
+    "dram_thru": 70.84,
+    "l2_thru": 85.18,
+    "comp_thru": 36.9,
+    "dur_ns": 28736.0
+  },
+  "void at::reduce_kernel<128, 4, at::ReduceOp<float, at::": {
+    "mem_thru": 2.49,
+    "dram_thru": 2.49,
+    "l2_thru": 1.12,
+    "comp_thru": 0.17,
+    "dur_ns": 14208.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::CUDAFunct": {
+    "mem_thru": 58.91,
+    "dram_thru": 58.91,
+    "l2_thru": 35.61,
+    "comp_thru": 4.62,
+    "dur_ns": 8117.33
+  },
+  "void at::vectorized_elementwise_kernel<4, at::GeluCUDAK": {
+    "mem_thru": 79.21,
+    "dram_thru": 79.21,
+    "l2_thru": 39.41,
+    "comp_thru": 34.53,
+    "dur_ns": 19232.0
+  },
+  "void conv2d_c1_k1_nhwc_kernel<float, float, float, floa": {
+    "mem_thru": 28.66,
+    "dram_thru": 7.69,
+    "l2_thru": 27.1,
+    "comp_thru": 28.66,
+    "dur_ns": 36256.0
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, ": {
+    "mem_thru": 20.81,
+    "dram_thru": 20.81,
+    "l2_thru": 14.79,
+    "comp_thru": 18.34,
+    "dur_ns": 5216.0
+  },
+  "void cudnn::convertTensor_kernel<float, float, float, 2": {
+    "mem_thru": 27.58,
+    "dram_thru": 22.03,
+    "l2_thru": 14.28,
+    "comp_thru": 22.73,
+    "dur_ns": 13129.6
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fp": {
+    "mem_thru": 48.17,
+    "dram_thru": 16.73,
+    "l2_thru": 48.17,
+    "comp_thru": 35.71,
+    "dur_ns": 17248.0
+  },
+  "void epilogue::globalKernel<8, 32, float, float, float,": {
+    "mem_thru": 2.31,
+    "dram_thru": 0.48,
+    "l2_thru": 1.05,
+    "comp_thru": 4.16,
+    "dur_ns": 3680.0
+  },
+  "void implicit_convolve_sgemm<float, float, 128, 5, 5, 3": {
+    "mem_thru": 33.99,
+    "dram_thru": 8.92,
+    "l2_thru": 31.04,
+    "comp_thru": 30.43,
+    "dur_ns": 19360.0
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "_5x_cudnn_ampere_scudnn_128x64_relu_xregs_large_nn_v1": {
+    "mem_thru": 32.33,
+    "dram_thru": 7.65,
+    "l2_thru": 10.51,
+    "comp_thru": 42.75,
+    "dur_ns": 45024.0
+  },
+  "ampere_sgemm_32x32_sliced1x4_nn": {
+    "mem_thru": 27.28,
+    "dram_thru": 9.71,
+    "l2_thru": 16.58,
+    "comp_thru": 27.28,
+    "dur_ns": 14400.0
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f": {
+    "mem_thru": 44.06,
+    "dram_thru": 7.21,
+    "l2_thru": 22.32,
+    "comp_thru": 31.03,
+    "dur_ns": 59008.0
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_conti": {
+    "mem_thru": 33.79,
+    "dram_thru": 33.79,
+    "l2_thru": 27.73,
+    "comp_thru": 40.82,
+    "dur_ns": 6976.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 6.95,
+    "dram_thru": 0.32,
+    "l2_thru": 5.46,
+    "comp_thru": 47.73,
+    "dur_ns": 7744.0
+  },
+  "void at::<unnamed>::max_pool_forward_nchw<float, float>": {
+    "mem_thru": 26.36,
+    "dram_thru": 26.36,
+    "l2_thru": 17.8,
+    "comp_thru": 54.55,
+    "dur_ns": 15664.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::<unnamed>": {
+    "mem_thru": 71.53,
+    "dram_thru": 71.53,
+    "l2_thru": 41.22,
+    "comp_thru": 10.69,
+    "dur_ns": 9312.0
+  },
+  "void cask__5x_cudnn::computeOffsetsKernel<0, 0>": {
+    "mem_thru": 2.78,
+    "dram_thru": 0.37,
+    "l2_thru": 2.78,
+    "comp_thru": 4.56,
+    "dur_ns": 3488.0
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, ": {
+    "mem_thru": 23.69,
+    "dram_thru": 23.69,
+    "l2_thru": 16.21,
+    "comp_thru": 14.43,
+    "dur_ns": 4704.0
+  },
+  "void cudnn::bn_fw_inf_1C11_kernel_NCHW<float, float, 1,": {
+    "mem_thru": 7.56,
+    "dram_thru": 7.56,
+    "l2_thru": 7.37,
+    "comp_thru": 5.01,
+    "dur_ns": 5344.0
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x": {
+    "mem_thru": 9.55,
+    "dram_thru": 9.55,
+    "l2_thru": 7.83,
+    "comp_thru": 6.56,
+    "dur_ns": 10336.0
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fp": {
+    "mem_thru": 43.26,
+    "dram_thru": 7.98,
+    "l2_thru": 43.26,
+    "comp_thru": 46.06,
+    "dur_ns": 42368.0
+  },
+  "void engines_precompiled::nchwToNhwcKernel<float, float": {
+    "mem_thru": 36.47,
+    "dram_thru": 27.87,
+    "l2_thru": 19.7,
+    "comp_thru": 51.16,
+    "dur_ns": 11424.0
+  },
+  "void engines_precompiled::nhwcToNchwKernel<float, float": {
+    "mem_thru": 53.38,
+    "dram_thru": 53.38,
+    "l2_thru": 33.92,
+    "comp_thru": 30.16,
+    "dur_ns": 8608.0
+  },
+  "void implicit_convolve_sgemm<float, float, 1024, 5, 5, ": {
+    "mem_thru": 6.22,
+    "dram_thru": 0.77,
+    "l2_thru": 4.48,
+    "comp_thru": 5.88,
+    "dur_ns": 16512.0
+  }
+}

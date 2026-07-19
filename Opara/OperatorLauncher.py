@@ -133,18 +133,26 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
     
     # 从 FX node 构建 KernelProfile 列表
     def kernel_profiles_from_node(node):
-        return [
-            KernelProfile(
-                name=info["name"],
-                duration=info["dur"] / 1000.0,
-                shared_mem=info["args"].get("shared memory", 0),
-                registers=info["args"].get("registers per thread", 0) * 
-                          info["args"]["block"][0] * info["args"]["block"][1] * info["args"]["block"][2],
-                warps=(info["args"]["block"][0] * info["args"]["block"][1] * info["args"]["block"][2] + 32 - 1) // 32,
-                blocks=info["args"]["grid"][0] * info["args"]["grid"][1] * info["args"]["grid"][2]
-            )
-            for info in node.info
-        ]
+        profiles = []
+        for info in node.info:
+            args = info.get('args', {})
+            block = args.get('block', (1, 1, 1))
+            grid = args.get('grid', (1, 1, 1))
+            block_threads = int(block[0]) * int(block[1]) * int(block[2])
+            blocks = int(grid[0]) * int(grid[1]) * int(grid[2])
+            profiles.append(KernelProfile(
+                name=info.get("name", ""),
+                duration=info.get("dur", 0.0) / 1000.0,
+                shared_mem=args.get("shared memory", 0),
+                registers=args.get("registers per thread", 0) * block_threads,
+                warps=(block_threads + 32 - 1) // 32,
+                blocks=blocks,
+                mem_thru=info.get('mem_thru', 0.0),
+                dram_thru=info.get('dram_thru', 0.0),
+                l2_thru=info.get('l2_thru', 0.0),
+                comp_thru=info.get('comp_thru', 0.0),
+            ))
+        return profiles
            # 初始化队列
     queue = deque()
     prestage_ops = []
@@ -352,6 +360,20 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, al
     if os.path.exists(path) is False:
         ModelProfiler.profile_serial(graph_module, inputs, path)
     node2kernels, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor , numSms = get_resource_from_json(path)
+
+    for i, node in enumerate(graph_module.graph.nodes):
+        if not hasattr(node, 'info'):
+            if i < len(node2kernels):
+                setattr(node, 'info', node2kernels[i])
+            else:
+                setattr(node, 'info', [])
+
+    # 可选：用 Nsight Compute 获取 memory 指标
+    try:
+        from Opara.ncu_profiler import profile_and_merge
+        profile_and_merge(graph_module, inputs, model_class_name.replace('_' + str(inputs[0].shape), ''))
+    except Exception:
+        pass  # ncu 不可用或超时，退回到无 memory 数据模式
 
     for i, node in enumerate(graph_module.graph.nodes):
         if not hasattr(node, 'info'):

@@ -1,0 +1,149 @@
+{
+  "_5x_cudnn_ampere_scudnn_128x32_relu_interior_nn_v1": {
+    "mem_thru": 26.53,
+    "dram_thru": 21.47,
+    "l2_thru": 17.23,
+    "comp_thru": 26.53,
+    "dur_ns": 18208.0
+  },
+  "_5x_cudnn_ampere_scudnn_winograd_128x128_ldg1_ldg4_relu": {
+    "mem_thru": 66.45,
+    "dram_thru": 15.07,
+    "l2_thru": 33.42,
+    "comp_thru": 66.45,
+    "dur_ns": 76896.0
+  },
+  "ampere_sgemm_128x32_nn": {
+    "mem_thru": 55.67,
+    "dram_thru": 17.8,
+    "l2_thru": 28.97,
+    "comp_thru": 55.67,
+    "dur_ns": 14608.0
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f": {
+    "mem_thru": 42.39,
+    "dram_thru": 20.43,
+    "l2_thru": 42.39,
+    "comp_thru": 47.68,
+    "dur_ns": 45664.0
+  },
+  "sm86_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nhwck": {
+    "mem_thru": 39.51,
+    "dram_thru": 3.01,
+    "l2_thru": 39.51,
+    "comp_thru": 30.09,
+    "dur_ns": 26048.0
+  },
+  "std::enable_if<!T7, void>::type internal::kernel<int, i": {
+    "mem_thru": 49.74,
+    "dram_thru": 49.74,
+    "l2_thru": 22.7,
+    "comp_thru": 26.47,
+    "dur_ns": 23008.0
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_conti": {
+    "mem_thru": 30.36,
+    "dram_thru": 30.36,
+    "l2_thru": 24.45,
+    "comp_thru": 36.5,
+    "dur_ns": 7029.33
+  },
+  "void at::<unnamed>::avg_pool2d_out_cuda_frame<float, fl": {
+    "mem_thru": 13.56,
+    "dram_thru": 8.94,
+    "l2_thru": 7.11,
+    "comp_thru": 50.49,
+    "dur_ns": 25056.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 8.61,
+    "dram_thru": 1.64,
+    "l2_thru": 8.61,
+    "comp_thru": 48.11,
+    "dur_ns": 7936.0
+  },
+  "void at::<unnamed>::max_pool_forward_nchw<float, float>": {
+    "mem_thru": 48.19,
+    "dram_thru": 48.19,
+    "l2_thru": 26.68,
+    "comp_thru": 61.93,
+    "dur_ns": 23056.0
+  },
+  "void at::reduce_kernel<512, 1, at::ReduceOp<float, at::": {
+    "mem_thru": 10.85,
+    "dram_thru": 10.85,
+    "l2_thru": 5.2,
+    "comp_thru": 23.82,
+    "dur_ns": 6944.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::<unnamed>": {
+    "mem_thru": 80.13,
+    "dram_thru": 80.13,
+    "l2_thru": 41.16,
+    "comp_thru": 10.12,
+    "dur_ns": 15920.0
+  },
+  "void cask__5x_cudnn::computeOffsetsKernel<0, 0>": {
+    "mem_thru": 3.44,
+    "dram_thru": 0.4,
+    "l2_thru": 3.44,
+    "comp_thru": 7.28,
+    "dur_ns": 3632.0
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, ": {
+    "mem_thru": 21.8,
+    "dram_thru": 21.8,
+    "l2_thru": 16.38,
+    "comp_thru": 12.67,
+    "dur_ns": 5752.0
+  },
+  "void cudnn::bn_fw_inf_1C11_kernel_NCHW<float, float, 1,": {
+    "mem_thru": 4.77,
+    "dram_thru": 3.86,
+    "l2_thru": 4.77,
+    "comp_thru": 5.23,
+    "dur_ns": 4304.0
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x": {
+    "mem_thru": 31.17,
+    "dram_thru": 11.11,
+    "l2_thru": 19.82,
+    "comp_thru": 26.44,
+    "dur_ns": 21864.0
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fp": {
+    "mem_thru": 27.59,
+    "dram_thru": 4.62,
+    "l2_thru": 23.58,
+    "comp_thru": 32.98,
+    "dur_ns": 15872.0
+  },
+  "void engines_precompiled::nchwToNhwcKernel<float, float": {
+    "mem_thru": 49.95,
+    "dram_thru": 49.95,
+    "l2_thru": 25.08,
+    "comp_thru": 64.0,
+    "dur_ns": 29184.0
+  },
+  "void engines_precompiled::nhwcToNchwKernel<float, float": {
+    "mem_thru": 13.96,
+    "dram_thru": 13.96,
+    "l2_thru": 13.7,
+    "comp_thru": 9.7,
+    "dur_ns": 4768.0
+  },
+  "void epilogue::globalKernel<8, 32, float, float, float,": {
+    "mem_thru": 2.43,
+    "dram_thru": 0.57,
+    "l2_thru": 1.05,
+    "comp_thru": 4.39,
+    "dur_ns": 3712.0
+  },
+  "void winograd::generateWinogradTilesKernel<0, float, fl": {
+    "mem_thru": 3.92,
+    "dram_thru": 2.65,
+    "l2_thru": 3.92,
+    "comp_thru": 2.13,
+    "dur_ns": 4176.0
+  }
+}

@@ -1,0 +1,156 @@
+{
+  "_5x_cudnn_ampere_scudnn_128x128_relu_medium_nn_v1": {
+    "mem_thru": 37.98,
+    "dram_thru": 21.25,
+    "l2_thru": 13.58,
+    "comp_thru": 43.69,
+    "dur_ns": 50752.0
+  },
+  "_5x_cudnn_ampere_scudnn_winograd_128x128_ldg1_ldg4_relu": {
+    "mem_thru": 49.78,
+    "dram_thru": 6.3,
+    "l2_thru": 30.47,
+    "comp_thru": 49.78,
+    "dur_ns": 75968.0
+  },
+  "ampere_sgemm_32x32_sliced1x4_nn": {
+    "mem_thru": 8.7,
+    "dram_thru": 2.62,
+    "l2_thru": 4.74,
+    "comp_thru": 8.7,
+    "dur_ns": 8864.0
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f": {
+    "mem_thru": 37.28,
+    "dram_thru": 7.63,
+    "l2_thru": 37.28,
+    "comp_thru": 41.08,
+    "dur_ns": 88837.12
+  },
+  "sm86_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nhwck": {
+    "mem_thru": 43.32,
+    "dram_thru": 5.32,
+    "l2_thru": 43.32,
+    "comp_thru": 43.18,
+    "dur_ns": 188736.0
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_conti": {
+    "mem_thru": 80.08,
+    "dram_thru": 80.08,
+    "l2_thru": 39.72,
+    "comp_thru": 60.2,
+    "dur_ns": 31488.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 9.64,
+    "dram_thru": 2.5,
+    "l2_thru": 9.64,
+    "comp_thru": 47.52,
+    "dur_ns": 8064.0
+  },
+  "void at::<unnamed>::max_pool_forward_nchw<float, float>": {
+    "mem_thru": 8.88,
+    "dram_thru": 2.32,
+    "l2_thru": 4.16,
+    "comp_thru": 26.76,
+    "dur_ns": 8608.0
+  },
+  "void at::<unnamed>::upsample_nearest2d_out_frame<float,": {
+    "mem_thru": 30.16,
+    "dram_thru": 30.16,
+    "l2_thru": 18.47,
+    "comp_thru": 45.18,
+    "dur_ns": 17600.0
+  },
+  "void at::elementwise_kernel<128, 2, void at::gpu_kernel": {
+    "mem_thru": 14.39,
+    "dram_thru": 14.39,
+    "l2_thru": 13.12,
+    "comp_thru": 13.98,
+    "dur_ns": 5024.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::<unnamed>": {
+    "mem_thru": 80.32,
+    "dram_thru": 80.32,
+    "l2_thru": 39.18,
+    "comp_thru": 34.66,
+    "dur_ns": 24608.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::CUDAFunct": {
+    "mem_thru": 65.16,
+    "dram_thru": 65.16,
+    "l2_thru": 36.19,
+    "comp_thru": 5.03,
+    "dur_ns": 10101.33
+  },
+  "void cask__5x_cudnn::computeOffsetsKernel<0, 0>": {
+    "mem_thru": 3.9,
+    "dram_thru": 0.98,
+    "l2_thru": 3.9,
+    "comp_thru": 8.3,
+    "dur_ns": 3616.0
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, ": {
+    "mem_thru": 29.7,
+    "dram_thru": 29.7,
+    "l2_thru": 18.25,
+    "comp_thru": 22.26,
+    "dur_ns": 10208.0
+  },
+  "void cudnn::bn_fw_inf_1C11_kernel_NCHW<float, float, 1,": {
+    "mem_thru": 26.22,
+    "dram_thru": 26.22,
+    "l2_thru": 20.65,
+    "comp_thru": 15.49,
+    "dur_ns": 6221.71
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128": {
+    "mem_thru": 37.64,
+    "dram_thru": 14.2,
+    "l2_thru": 37.64,
+    "comp_thru": 43.06,
+    "dur_ns": 34352.0
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_256": {
+    "mem_thru": 30.28,
+    "dram_thru": 18.88,
+    "l2_thru": 30.28,
+    "comp_thru": 34.9,
+    "dur_ns": 29600.0
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x": {
+    "mem_thru": 65.36,
+    "dram_thru": 26.35,
+    "l2_thru": 65.36,
+    "comp_thru": 47.99,
+    "dur_ns": 61264.0
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fp": {
+    "mem_thru": 67.48,
+    "dram_thru": 18.46,
+    "l2_thru": 67.48,
+    "comp_thru": 56.93,
+    "dur_ns": 71808.0
+  },
+  "void engines_precompiled::nchwToNhwcKernel<float, float": {
+    "mem_thru": 59.21,
+    "dram_thru": 59.21,
+    "l2_thru": 28.02,
+    "comp_thru": 68.81,
+    "dur_ns": 62112.0
+  },
+  "void engines_precompiled::nhwcToNchwKernel<float, float": {
+    "mem_thru": 67.39,
+    "dram_thru": 67.39,
+    "l2_thru": 36.63,
+    "comp_thru": 35.4,
+    "dur_ns": 13248.0
+  },
+  "void winograd::generateWinogradTilesKernel<0, float, fl": {
+    "mem_thru": 26.63,
+    "dram_thru": 26.63,
+    "l2_thru": 26.18,
+    "comp_thru": 16.76,
+    "dur_ns": 6206.22
+  }
+}

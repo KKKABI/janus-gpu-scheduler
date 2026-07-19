@@ -1,0 +1,114 @@
+{
+  "ampere_sgemm_32x32_sliced1x4_tn": {
+    "mem_thru": 68.63,
+    "dram_thru": 49.87,
+    "l2_thru": 26.28,
+    "comp_thru": 58.4,
+    "dur_ns": 29542.67
+  },
+  "ampere_sgemm_64x32_sliced1x4_tn": {
+    "mem_thru": 51.89,
+    "dram_thru": 47.82,
+    "l2_thru": 23.1,
+    "comp_thru": 45.34,
+    "dur_ns": 33364.0
+  },
+  "fmha_cutlassF_f32_aligned_64x64_rf_sm80": {
+    "mem_thru": 4.02,
+    "dram_thru": 1.94,
+    "l2_thru": 3.64,
+    "comp_thru": 4.83,
+    "dur_ns": 17529.33
+  },
+  "std::enable_if<!T7, void>::type internal::kernel<int, i": {
+    "mem_thru": 50.02,
+    "dram_thru": 34.56,
+    "l2_thru": 16.98,
+    "comp_thru": 16.64,
+    "dur_ns": 9184.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 0.7,
+    "dram_thru": 0.33,
+    "l2_thru": 0.7,
+    "comp_thru": 0.21,
+    "dur_ns": 3616.0
+  },
+  "void at::<unnamed>::indexSelectSmallIndex<float, long, ": {
+    "mem_thru": 0.59,
+    "dram_thru": 0.33,
+    "l2_thru": 0.59,
+    "comp_thru": 0.79,
+    "dur_ns": 14000.0
+  },
+  "void at::<unnamed>::vectorized_layer_norm_kernel<float,": {
+    "mem_thru": 2.08,
+    "dram_thru": 1.47,
+    "l2_thru": 2.08,
+    "comp_thru": 1.65,
+    "dur_ns": 7187.84
+  },
+  "void at::index_elementwise_kernel<128, 4, void at::gpu_": {
+    "mem_thru": 1.0,
+    "dram_thru": 1.0,
+    "l2_thru": 0.8,
+    "comp_thru": 0.02,
+    "dur_ns": 5696.0
+  },
+  "void at::reduce_kernel<512, 1, at::ReduceOp<bool, at::f": {
+    "mem_thru": 1.23,
+    "dram_thru": 1.23,
+    "l2_thru": 0.95,
+    "comp_thru": 0.01,
+    "dur_ns": 5712.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::AUnaryFun": {
+    "mem_thru": 0.76,
+    "dram_thru": 0.2,
+    "l2_thru": 0.76,
+    "comp_thru": 0.02,
+    "dur_ns": 3248.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::CUDAFunct": {
+    "mem_thru": 4.18,
+    "dram_thru": 4.18,
+    "l2_thru": 3.7,
+    "comp_thru": 0.33,
+    "dur_ns": 3255.38
+  },
+  "void at::vectorized_elementwise_kernel<4, at::FillFunct": {
+    "mem_thru": 0.9,
+    "dram_thru": 0.16,
+    "l2_thru": 0.9,
+    "comp_thru": 0.01,
+    "dur_ns": 2656.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::GeluCUDAK": {
+    "mem_thru": 7.84,
+    "dram_thru": 7.67,
+    "l2_thru": 7.82,
+    "comp_thru": 5.01,
+    "dur_ns": 3546.67
+  },
+  "void at::vectorized_elementwise_kernel<4, at::tanh_kern": {
+    "mem_thru": 0.8,
+    "dram_thru": 0.34,
+    "l2_thru": 0.8,
+    "comp_thru": 0.09,
+    "dur_ns": 3600.0
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, ": {
+    "mem_thru": 11.47,
+    "dram_thru": 11.21,
+    "l2_thru": 10.66,
+    "comp_thru": 15.13,
+    "dur_ns": 4985.33
+  },
+  "void epilogue::globalKernel<8, 32, float, float, float,": {
+    "mem_thru": 1.87,
+    "dram_thru": 0.41,
+    "l2_thru": 0.94,
+    "comp_thru": 3.36,
+    "dur_ns": 3792.0
+  }
+}

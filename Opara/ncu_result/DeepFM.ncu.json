@@ -1,0 +1,86 @@
+{
+  "std::enable_if<!T7, void>::type internal::kernel<int, i": {
+    "mem_thru": 5.51,
+    "dram_thru": 3.74,
+    "l2_thru": 2.53,
+    "comp_thru": 2.92,
+    "dur_ns": 5248.0
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_conti": {
+    "mem_thru": 0.72,
+    "dram_thru": 0.3,
+    "l2_thru": 0.72,
+    "comp_thru": 0.17,
+    "dur_ns": 4208.0
+  },
+  "void at::<unnamed>::distribution_elementwise_grid_strid": {
+    "mem_thru": 0.7,
+    "dram_thru": 0.33,
+    "l2_thru": 0.7,
+    "comp_thru": 0.21,
+    "dur_ns": 3616.0
+  },
+  "void at::<unnamed>::indexSelectSmallIndex<float, long, ": {
+    "mem_thru": 0.53,
+    "dram_thru": 0.12,
+    "l2_thru": 0.53,
+    "comp_thru": 0.01,
+    "dur_ns": 4806.0
+  },
+  "void at::batch_norm_transform_input_channels_last_kerne": {
+    "mem_thru": 0.8,
+    "dram_thru": 0.44,
+    "l2_thru": 0.8,
+    "comp_thru": 0.11,
+    "dur_ns": 3584.0
+  },
+  "void at::reduce_kernel<128, 4, at::ReduceOp<float, at::": {
+    "mem_thru": 1.07,
+    "dram_thru": 1.07,
+    "l2_thru": 0.77,
+    "comp_thru": 0.02,
+    "dur_ns": 8568.0
+  },
+  "void at::reduce_kernel<512, 1, at::ReduceOp<float, at::": {
+    "mem_thru": 1.22,
+    "dram_thru": 1.22,
+    "l2_thru": 0.95,
+    "comp_thru": 0.01,
+    "dur_ns": 5504.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::<unnamed>": {
+    "mem_thru": 0.77,
+    "dram_thru": 0.22,
+    "l2_thru": 0.77,
+    "comp_thru": 0.03,
+    "dur_ns": 3290.67
+  },
+  "void at::vectorized_elementwise_kernel<4, at::AUnaryFun": {
+    "mem_thru": 0.8,
+    "dram_thru": 0.16,
+    "l2_thru": 0.8,
+    "comp_thru": 0.01,
+    "dur_ns": 3104.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::BinaryFun": {
+    "mem_thru": 0.8,
+    "dram_thru": 0.18,
+    "l2_thru": 0.8,
+    "comp_thru": 0.01,
+    "dur_ns": 3080.0
+  },
+  "void at::vectorized_elementwise_kernel<4, at::CUDAFunct": {
+    "mem_thru": 0.8,
+    "dram_thru": 0.17,
+    "l2_thru": 0.8,
+    "comp_thru": 0.01,
+    "dur_ns": 3155.2
+  },
+  "void at::vectorized_elementwise_kernel<4, at::sigmoid_k": {
+    "mem_thru": 0.75,
+    "dram_thru": 0.3,
+    "l2_thru": 0.75,
+    "comp_thru": 0.02,
+    "dur_ns": 3360.0
+  }
+}

@@ -15,11 +15,13 @@ class HarnessTests(unittest.TestCase):
 
     def test_primary_matrix_has_unambiguous_alpha_rows(self):
         tasks = expand_tasks(self.config, ["GoogLeNet"], PRIMARY_VARIANTS, 1)
-        self.assertEqual(len(tasks), 11)
+        self.assertEqual(len(tasks), 12)
         baseline = [task for task in tasks if task.variant == "Baseline"]
+        td_janus = [task for task in tasks if task.variant == "TD+Janus"]
         drt = [task for task in tasks if task.variant.endswith("DRT")]
         cosine = [task for task in tasks if task.variant.endswith("Cos")]
         self.assertEqual(len(baseline), 1); self.assertIsNone(baseline[0].alpha)
+        self.assertEqual(len(td_janus), 1); self.assertIsNone(td_janus[0].alpha)
         self.assertEqual(len(drt), 2); self.assertTrue(all(task.alpha is None for task in drt))
         self.assertEqual(len(cosine), 8); self.assertTrue(all(task.alpha in self.config["alpha_grid"] for task in cosine))
 

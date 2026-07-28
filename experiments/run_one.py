@@ -109,9 +109,23 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
     if spec.get("alpha") == "alpha_grid":
         if task.alpha not in config["alpha_grid"]: raise ValueError(f"invalid alpha for {task.variant}: {task.alpha}")
     elif task.alpha is not None: raise ValueError(f"{task.variant} must use alpha=null")
-    if task.variant == "Baseline": return {"selection_mode": "legacy_balance", "time_domain": False, "internal_alpha": 0.9}
-    selection = {"cosine": "cosine", "min_resource": "min_resource", "drt_no_alpha": "static_interference"}[spec["score"]]
-    return {"selection_mode": selection, "time_domain": spec["simulator"] == "td", "internal_alpha": 0.0 if spec["score"] == "drt_no_alpha" else float(task.alpha)}
+    selection = {
+        "legacy_balance": "legacy_balance",
+        "cosine": "cosine",
+        "min_resource": "min_resource",
+        "drt_no_alpha": "static_interference",
+    }[spec["score"]]
+    if "internal_alpha" in spec:
+        internal_alpha = float(spec["internal_alpha"])
+    elif spec["score"] == "drt_no_alpha":
+        internal_alpha = 0.0
+    else:
+        internal_alpha = float(task.alpha)
+    return {
+        "selection_mode": selection,
+        "time_domain": spec["simulator"] == "td",
+        "internal_alpha": internal_alpha,
+    }
 
 
 def main() -> int:
@@ -138,6 +152,19 @@ def main() -> int:
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
         runner = GraphCapturer.capturer(inputs, model, copy_outputs=False, alpha=params["internal_alpha"], selection_mode=params["selection_mode"], time_domain=params["time_domain"])
+        from Opara.Scheduler import get_candidate_stats
+        scheduler_calls = get_candidate_stats(clear=True)
+        total_enumerated = sum(item["enumerated_count"] for item in scheduler_calls)
+        total_feasible = sum(item["feasible_count"] for item in scheduler_calls)
+        scheduler_summary = {
+            "call_count": len(scheduler_calls),
+            "enumerated_count": total_enumerated,
+            "feasible_count": total_feasible,
+            "pass_rate": total_feasible / total_enumerated if total_enumerated else 0.0,
+            "single_scoring_candidate_calls": sum(
+                item["scoring_candidate_count"] == 1 for item in scheduler_calls
+            ),
+        }
         with torch.no_grad(): candidate = runner(*inputs)
         correctness = compare_outputs(reference, candidate, float(config["correctness"]["float_rtol"]), float(config["correctness"]["float_atol"]))
         spec = config["models"][task.model]
@@ -150,7 +177,7 @@ def main() -> int:
             start.record(); runner(*inputs); end.record(); end.synchronize(); value = float(start.elapsed_time(end))
             if not math.isfinite(value): raise RuntimeError(f"non-finite timing sample: {value}")
             samples.append(value)
-        result = {"schema_version": 1, "status": "completed", "task": task.to_dict(), "effective_parameters": params, "model_spec": spec, "profile": {"path": str(profile), "sha256": sha256_file(profile)}, "correctness": correctness, "timing": {"samples_ms": samples, "statistics": stats_from_samples(samples)}, "telemetry": {"before_model_load": before_load, "before_timing": before_timing, "after_timing": gpu_snapshot()}, "runtime": {**runtime_metadata(), "torch": torch.__version__, "torch_cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "cudnn_benchmark": torch.backends.cudnn.benchmark, "cudnn_deterministic": torch.backends.cudnn.deterministic}, "started_unix": started, "finished_unix": time.time()}
+        result = {"schema_version": 1, "status": "completed", "task": task.to_dict(), "effective_parameters": params, "scheduler": {"summary": scheduler_summary, "calls": scheduler_calls}, "model_spec": spec, "profile": {"path": str(profile), "sha256": sha256_file(profile)}, "correctness": correctness, "timing": {"samples_ms": samples, "statistics": stats_from_samples(samples)}, "telemetry": {"before_model_load": before_load, "before_timing": before_timing, "after_timing": gpu_snapshot()}, "runtime": {**runtime_metadata(), "torch": torch.__version__, "torch_cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "cudnn_benchmark": torch.backends.cudnn.benchmark, "cudnn_deterministic": torch.backends.cudnn.deterministic}, "started_unix": started, "finished_unix": time.time()}
         write_json_atomic(output_dir / "result.json", result); write_json_atomic(status_path, {"status": "completed", "task": task.to_dict()}); return 0
     except Exception as error:
         failure = {"status": "failed", "task": task.to_dict(), "error_type": type(error).__name__, "error": str(error), "traceback": traceback.format_exc(), "started_unix": started, "finished_unix": time.time()}

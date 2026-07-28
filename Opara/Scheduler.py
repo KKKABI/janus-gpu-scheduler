@@ -1,7 +1,8 @@
 from typing import List
 import copy
+import json
+import math
 import os
-import sys
 from itertools import combinations
 
 
@@ -277,29 +278,52 @@ class ResourceModel:
 # 爆搜
 # ---
 
-# 全局统计：每次 schedule() 调用时不同 alpha 下的候选组合数
-_CANDIDATE_STATS = []  # list of dict: {total, alpha_0.9, alpha_0.8, alpha_0.5, alpha_0.2, occ_max}
+# 全局统计：每次 schedule() 调用的 ready 集合、枚举、可行和最终选择。
+_CANDIDATE_STATS = []
+
+
+def clear_candidate_stats():
+    _CANDIDATE_STATS.clear()
+
+
+def get_candidate_stats(clear=False):
+    stats = copy.deepcopy(_CANDIDATE_STATS)
+    if clear:
+        _CANDIDATE_STATS.clear()
+    return stats
 
 def dump_candidate_stats():
-    """打印候选组合统计汇总"""
+    """打印逐次 scheduler 统计，并输出一行便于脚本解析的 JSON。"""
     if not _CANDIDATE_STATS:
         return
     print("\n" + "=" * 70)
-    print("  CANDIDATE COMBO STATS (Direction B scheduler)")
+    print("  CANDIDATE COMBO STATS (per scheduler call)")
     print("=" * 70)
-    print(f"  {'call':>5} {'total':>7} {'a=0.9':>7} {'a=0.8':>7} {'a=0.5':>7} {'a=0.2':>7} {'occ_max':>8}")
-    print("  " + "-" * 52)
-    for i, s in enumerate(_CANDIDATE_STATS):
-        print(f"  {i:>5} {s['total']:>7} {s['a=0.9']:>7} {s['a=0.8']:>7} {s['a=0.5']:>7} {s['a=0.2']:>7} {s['occ_max']:>7.4f}")
-    # 汇总
-    total_all = sum(s['total'] for s in _CANDIDATE_STATS)
+    print(
+        f"  {'call':>5} {'ready':>5} {'used':>5} {'enum':>7} "
+        f"{'pass':>7} {'score':>7} {'mode':>19} {'sim':>6} selected"
+    )
+    print("  " + "-" * 110)
+    for s in _CANDIDATE_STATS:
+        selected = "+".join(s["selected"])
+        simulator = "TD" if s["time_domain"] else "Static"
+        print(
+            f"  {s['call']:>5} {s['ready_count']:>5} {s['ready_used_count']:>5} "
+            f"{s['enumerated_count']:>7} {s['feasible_count']:>7} "
+            f"{s['scoring_candidate_count']:>7} {s['selection_mode']:>19} "
+            f"{simulator:>6} {selected}"
+        )
+
+    total_enumerated = sum(s['enumerated_count'] for s in _CANDIDATE_STATS)
+    total_feasible = sum(s['feasible_count'] for s in _CANDIDATE_STATS)
     n_calls = len(_CANDIDATE_STATS)
-    for a in ['a=0.9', 'a=0.8', 'a=0.5', 'a=0.2']:
-        n_single = sum(1 for s in _CANDIDATE_STATS if s[a] == 1)
-        avg = sum(s[a] for s in _CANDIDATE_STATS) / n_calls
-        print(f"  {a}: avg={avg:.1f}, only_1_combo={n_single}/{n_calls} ({100*n_single/n_calls:.0f}%)")
+    print(
+        f"  calls={n_calls}, enumerated={total_enumerated}, "
+        f"feasible={total_feasible}, "
+        f"pass_rate={100.0 * total_feasible / max(total_enumerated, 1):.2f}%"
+    )
+    print("CANDIDATE_STATS_JSON=" + json.dumps(_CANDIDATE_STATS, ensure_ascii=False))
     print("=" * 70)
-    # _CANDIDATE_STATS.clear()  # 注释掉，由外部控制清空时机
 
 
 class Scheduler:
@@ -312,6 +336,38 @@ class Scheduler:
         self.occupancy_weight = float(os.getenv('JANUS_OCCUPANCY_WEIGHT', '0.005'))
         self.time_domain = time_domain
         self._static_profile_cache = {}
+        self._schedule_call = 0
+
+    def _record_candidate_stats(
+            self, ready_names, ready_used_names, raw_theoretical_count,
+            theoretical_count, combo_scores, top_candidates, selected_combo,
+            occ_max, current_time):
+        self._schedule_call += 1
+        feasible_count = sum(1 for _, score in combo_scores if score >= 0)
+        if self.selection_mode == 'static_interference':
+            scoring_candidate_count = feasible_count
+        else:
+            scoring_candidate_count = len(top_candidates)
+        _CANDIDATE_STATS.append({
+            'call': self._schedule_call,
+            'current_time': float(current_time),
+            'time_domain': bool(self.time_domain),
+            'selection_mode': self.selection_mode,
+            'alpha': float(self.alpha),
+            'ready_count': len(ready_names),
+            'ready_used_count': len(ready_used_names),
+            'ready_ops': ready_names,
+            'ready_used_ops': ready_used_names,
+            'raw_theoretical_count': raw_theoretical_count,
+            'theoretical_count': theoretical_count,
+            'enumerated_count': len(combo_scores),
+            'feasible_count': feasible_count,
+            'alpha_candidate_count': len(top_candidates),
+            'scoring_candidate_count': scoring_candidate_count,
+            'occ_max': float(occ_max),
+            'selected': [op.name for op in selected_combo],
+            'selected_size': len(selected_combo),
+        })
 
     def _select_static_interference(self, ready_ops, combo_scores):
         """Predict round-time gain from magnitude-aware static pressure."""
@@ -377,6 +433,12 @@ class Scheduler:
     def schedule(self, ready_ops: List["OperatorTask"], current_time: float) -> List["OperatorTask"]:
 
         self.resource_model.update_time(current_time)
+        ready_names = [op.name for op in ready_ops]
+        raw_max_comb_size = min(5, len(ready_ops))
+        raw_theoretical_count = sum(
+            math.comb(len(ready_ops), r)
+            for r in range(1, raw_max_comb_size + 1)
+        )
         # 枚举所有候选组合并计算每个组合的 SM 占用率（occupancy）
         combo_scores = []  # list of (combo_list, occupancy_score)
 
@@ -387,6 +449,12 @@ class Scheduler:
             ready_ops = sorted(ready_ops, key=lambda op: sum(
                 k.duration for k in op.kernels
             ), reverse=True)[:MAX_READY]
+        ready_used_names = [op.name for op in ready_ops]
+        max_comb_size = min(5, len(ready_ops))
+        theoretical_count = sum(
+            math.comb(len(ready_ops), r)
+            for r in range(1, max_comb_size + 1)
+        )
         for r in range(1, max_comb_size + 1):
             for combo in combinations(ready_ops, r):
                 virtual_model = copy.deepcopy(self.resource_model)
@@ -405,38 +473,31 @@ class Scheduler:
                 combo_scores.append((list(combo), score))
 
         if not combo_scores:
+            self._record_candidate_stats(
+                ready_names, ready_used_names, raw_theoretical_count,
+                theoretical_count, combo_scores, [], [], -1.0,
+                current_time)
             return []
 
         # 找到最大占用率
         occ_max = max(score for _, score in combo_scores)
 
-        # 统计不同 alpha 下的候选组合数
-        total_feasible = sum(1 for _, s in combo_scores if s >= 0)
-        td = 'TD' if self.time_domain else 'ST'
-        model_name = getattr(self.resource_model, 'model_name', '?')
-        print(f"  [{td}] model={model_name} ready={len(ready_ops)} total={len(combo_scores)} feas={total_feasible}", file=sys.stderr)
-
-        # ---- 诊断：对比 Static vs Time-domain 候选数 ----
-        td = getattr(self.resource_model, 'time_domain', False)
-        total_enum = len(combo_scores)
-        print(f"[DIAG] time_domain={td} | ready_ops={len(ready_ops)} | "
-              f"enumerated={total_enum} | feasible={total_feasible} | "
-              f"occ_max={occ_max:.4f}")
-        stats = {'total': total_feasible, 'occ_max': occ_max}
-        for a_label, a_val in [('a=0.9', 0.9), ('a=0.8', 0.8), ('a=0.5', 0.5), ('a=0.2', 0.2)]:
-            cnt = sum(1 for _, s in combo_scores if s >= a_val * occ_max)
-            stats[a_label] = cnt
-        _CANDIDATE_STATS.append(stats)
-
         # alpha 控制保留阈值
         alpha = self.alpha
         top_candidates = [combo for combo, score in combo_scores if score >= alpha * occ_max]
+
+        def finish(selected_combo):
+            self._record_candidate_stats(
+                ready_names, ready_used_names, raw_theoretical_count,
+                theoretical_count, combo_scores, top_candidates,
+                selected_combo, occ_max, current_time)
+            return selected_combo
 
         # 如果没有满足阈值的候选，则退回到单纯的最大占用组合
         if not top_candidates:
             # 取占用率最高的组合
             best_combo = max(combo_scores, key=lambda x: x[1])[0]
-            return best_combo
+            return finish(best_combo)
 
         # ===== 检查是否有 ncu memory 数据 =====
         _has_ncu = any(
@@ -467,14 +528,14 @@ class Scheduler:
                 occupancy = next(score for candidate, score in combo_scores if candidate == combo)
                 return abs(compute_count - memory_count), -occupancy
 
-            return min(top_candidates, key=legacy_imbalance_score)
+            return finish(min(top_candidates, key=legacy_imbalance_score))
 
         if self.selection_mode == 'static_interference':
-            return self._select_static_interference(ready_ops, combo_scores)
+            return finish(self._select_static_interference(ready_ops, combo_scores))
 
         if self.selection_mode == 'max_occupancy':
             best_combo = max(top_candidates, key=lambda c: next(s for cc, s in combo_scores if cc is c))
-            return best_combo
+            return finish(best_combo)
 
         elif self.selection_mode == 'memory_aware':
             # Memory-aware 策略：避免两个高 DRAM 算子放一起
@@ -506,7 +567,7 @@ class Scheduler:
                 return occ - penalty
 
             best_combo = max(top_candidates, key=memory_aware_score)
-            return best_combo
+            return finish(best_combo)
 
         elif self.selection_mode == 'min_resource':
             # 资源加和策略：选总资源压力最小的组合
@@ -536,7 +597,7 @@ class Scheduler:
                 return (score, -occ)
 
             best_combo = min(top_candidates, key=combo_sort_key_minres)
-            return best_combo
+            return finish(best_combo)
 
         else:  # 'cosine' — 余弦相似度（自动扩展维度）
             def resource_diversity_score(combo):
@@ -591,7 +652,7 @@ class Scheduler:
                 return (sim, -occ)
 
             best_combo = min(top_candidates, key=combo_sort_key)
-            return best_combo
+            return finish(best_combo)
 
 
 
@@ -632,6 +693,3 @@ class Scheduler:
 #             self.resource_model.apply_launch(op, current_time)
 
 #         return best_combination
-
-
-

@@ -51,7 +51,7 @@ conda activate opara
 - `score=drt_no_alpha`：DRT/static_interference 打分，不使用 α 过滤，结果中的 `alpha` 必须为 `null`。
 - 如以后实现“带 α 的 DRT”，必须使用新名称 `drt_alpha`，不得复用 `drt_no_alpha`。
 - α 网格固定为 `[0.9, 0.8, 0.5, 0.2]`，只用于实际执行 α 过滤的策略。
-- 主消融矩阵为 Baseline、Static+Cos、TD+Cos、Static+DRT、TD+DRT；MinRes 和 α 扫描单独呈现。
+- 主消融矩阵为 Baseline、TD+Janus、Static+Cos、TD+Cos、Static+DRT、TD+DRT；其中 TD+Janus 保留原始名称平衡打分与内部 α=0.9，仅切换为时域仿真，用于隔离 DRT 的独立贡献。MinRes 和 α 扫描单独呈现。
 
 ## 5. 正确性门槛
 

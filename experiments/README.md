@@ -10,7 +10,7 @@ Activate the frozen environment and enter the isolated worktree:
 
 Print a deterministic plan without writing files or using the GPU:
 
-    python experiments/run_matrix.py --dry-run --models GoogLeNet --variants Baseline TD+Cos TD+DRT --repeats 2
+    python experiments/run_matrix.py --dry-run --models GoogLeNet --variants Baseline TD+Janus TD+DRT --repeats 2
 
 Verify the interpreter and all frozen manifests without running inference:
 
@@ -20,7 +20,7 @@ Run unit tests:
 
     python -m unittest experiments/test_harness.py
 
-The default official command expands the six primary models, five primary variants and five independent process repeats:
+The default official command expands the six primary models, six primary variants and five independent process repeats. `TD+Janus` keeps the original Janus name-balance scorer and changes only the simulator, providing the direct control needed to isolate DRT:
 
     python experiments/run_matrix.py
 

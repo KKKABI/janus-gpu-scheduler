@@ -5,7 +5,9 @@ from Opara import ModelProfiler
 import sys
 import math
 from collections import deque
-from Opara.Scheduler import Scheduler, OperatorTask, KernelProfile, ResourceModel, VirtualSM
+from Opara.Scheduler import (Scheduler, OperatorTask, KernelProfile,
+                             ResourceModel, VirtualSM,
+                             clear_candidate_stats, dump_candidate_stats)
 import os
 path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
@@ -121,6 +123,7 @@ def pop_lowPriorty_from_queue(queue, tau=0.5):
 
 def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams ,max_width, alpha=0.9, selection_mode='cosine', time_domain=True):
 
+    clear_candidate_stats()
     sm_specs = {
         'shared_mem_total': sharedMemPerMultiprocessor,
         'register_total': regsPerMultiprocessor,
@@ -249,8 +252,7 @@ def launch(nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor,
                 in_degree[user] -= 1
                 if in_degree[user] == 0:
                     queue.append(user)
-        from Opara.Scheduler import dump_candidate_stats
-        dump_candidate_stats()
+    dump_candidate_stats()
     return result
     
     

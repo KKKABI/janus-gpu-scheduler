@@ -93,6 +93,14 @@
       "reference_commit": "73f4da51354a554f4abee476ad1a57a6e6a5af42"
     },
     {
+      "label": "TD+Janus",
+      "simulator": "td",
+      "score": "legacy_balance",
+      "alpha": null,
+      "internal_alpha": 0.9,
+      "role": "primary_ablation"
+    },
+    {
       "label": "Static+Cos",
       "simulator": "static",
       "score": "cosine",

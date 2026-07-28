@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "experiments" / "repro_config.json"
-PRIMARY_VARIANTS = ("Baseline", "Static+Cos", "TD+Cos", "Static+DRT", "TD+DRT")
+PRIMARY_VARIANTS = ("Baseline", "TD+Janus", "Static+Cos", "TD+Cos", "Static+DRT", "TD+DRT")
 
 
 @dataclass(frozen=True)

@@ -162,7 +162,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
     Critical_node.mark_critical_nodes(graph)
     OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, alpha, selection_mode, time_domain)
 
-    print(stream for stream in all_streams)
+    # print(stream for stream in all_streams)
         
     for node in graph.nodes:
         for input_node in node.all_input_nodes:

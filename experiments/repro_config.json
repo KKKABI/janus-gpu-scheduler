@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-07-28T00:00:00+08:00",
+  "source": {
+    "worktree": "/public_0/LYX/janus_repro",
+    "branch": "experiment/td-drt-repro",
+    "upstream_base_commit": "6d4d4fc061f121cd61b0e669a7fa5184752841e4",
+    "code_snapshot_commit": "fea25ed"
+  },
+  "environment": {
+    "activation": [
+      "source /usr/local/Anaconda3/etc/profile.d/conda.sh",
+      "conda activate opara"
+    ],
+    "conda_prefix": "/home/lyx/.conda/envs/opara",
+    "python": "3.10.4",
+    "python_executable": "/home/lyx/.conda/envs/opara/bin/python",
+    "torch": "2.4.0+cu124",
+    "torchvision": "0.19.0+cu124",
+    "torch_cuda": "12.4",
+    "cudnn": 90100,
+    "numpy": "2.2.6",
+    "transformers": "4.47.0",
+    "pretrainedmodels": "0.7.4",
+    "ultralytics": "8.4.41",
+    "cudnn_benchmark": false,
+    "cudnn_deterministic": false
+  },
+  "hardware": {
+    "hostname": "ubuntu108",
+    "gpu": "NVIDIA RTX A5000",
+    "gpu_memory_gib": 24,
+    "gpu_uuid": "GPU-32a478ec-0d66-5b4f-6452-3923afcef998",
+    "compute_capability": "8.6",
+    "driver": "555.42.02",
+    "nvidia_smi_cuda_runtime": "12.5",
+    "system_nvcc": "11.7.64",
+    "max_sm_clock_mhz": 2100,
+    "max_memory_clock_mhz": 8001,
+    "mps": false
+  },
+  "measurement": {
+    "seed": 20260728,
+    "batch_size": 1,
+    "warmup_iterations": 50,
+    "timed_iterations": 100,
+    "independent_process_repeats": 5,
+    "timer": "cuda_event",
+    "synchronize_after_warmup": true,
+    "synchronize_each_sample": true,
+    "cache_buffer_bytes": 4194304,
+    "cache_buffer_dtype": "torch.int8",
+    "primary_statistic": "median_of_process_medians",
+    "secondary_statistics": [
+      "mean_of_process_medians",
+      "sample_std_of_process_medians",
+      "mad_of_process_medians",
+      "per_process_min",
+      "per_process_max"
+    ],
+    "configuration_order": "seeded_shuffle(seed + repeat_index)",
+    "one_gpu_process_at_a_time": true
+  },
+  "correctness": {
+    "reference": "eager_model_same_state_same_input",
+    "inference_mode": true,
+    "float_rtol": 0.0001,
+    "float_atol": 0.00001,
+    "integer_and_boolean_exact": true,
+    "abort_on_mismatch": true,
+    "abort_on_non_finite": true
+  },
+  "alpha_grid": [
+    0.9,
+    0.8,
+    0.5,
+    0.2
+  ],
+  "variants": [
+    {"label": "Baseline", "simulator": null, "score": null, "alpha": null},
+    {"label": "Static+Cos", "simulator": "static", "score": "cosine", "alpha": "alpha_grid"},
+    {"label": "TD+Cos", "simulator": "td", "score": "cosine", "alpha": "alpha_grid"},
+    {"label": "Static+DRT", "simulator": "static", "score": "drt_no_alpha", "alpha": null},
+    {"label": "TD+DRT", "simulator": "td", "score": "drt_no_alpha", "alpha": null},
+    {"label": "Static+MinRes", "simulator": "static", "score": "min_resource", "alpha": "alpha_grid", "role": "secondary"},
+    {"label": "TD+MinRes", "simulator": "td", "score": "min_resource", "alpha": "alpha_grid", "role": "secondary"}
+  ],
+  "models": {
+    "GoogLeNet": {
+      "role": "primary",
+      "constructor": "torchvision.models.googlenet(weights=None)",
+      "inputs": [{"name": "image", "shape": [1, 3, 224, 224], "dtype": "float32"}]
+    },
+    "Inception-v3": {
+      "role": "primary",
+      "constructor": "torchvision.models.inception_v3(weights=None)",
+      "inputs": [{"name": "image", "shape": [1, 3, 299, 299], "dtype": "float32"}]
+    },
+    "BERT": {
+      "role": "primary",
+      "constructor": "BertModel.from_pretrained('/public_0/ZYF/model/bert-base')",
+      "inputs": [{"name": "input_ids", "shape": [1, 16], "dtype": "int64", "range": [0, 30522]}]
+    },
+    "NASNet": {
+      "role": "primary",
+      "constructor": "pretrainedmodels.__dict__['nasnetalarge'](num_classes=1000, pretrained='imagenet')",
+      "inputs": [{"name": "image", "shape": [1, 3, 331, 331], "dtype": "float32"}]
+    },
+    "YOLOv8x": {
+      "role": "primary",
+      "constructor": "YOLO('/public_0/ZYF/model/YOLOv8/yolov8x.pt').model",
+      "inputs": [{"name": "image", "shape": [1, 3, 640, 640], "dtype": "float32"}]
+    },
+    "ConvNeXt": {
+      "role": "primary",
+      "constructor": "torchvision.models.convnext_tiny(weights=None)",
+      "inputs": [{"name": "image", "shape": [1, 3, 224, 224], "dtype": "float32"}]
+    },
+    "DeepFM": {
+      "role": "secondary",
+      "constructor": "examples.NCF.DeepFM(cate=[100*(i+1) for i in range(32)], num_cont=16, emb_size=8, hid_dims=[256,128], num_classes=1, dropout=[0.2,0.2])",
+      "inputs": [
+        {"name": "categorical", "shape": [1, 32], "dtype": "int64"},
+        {"name": "continuous", "shape": [1, 16], "dtype": "float32"}
+      ]
+    }
+  }
+}

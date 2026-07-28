@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 def manifest_paths() -> list[Path]:
     base = REPO_ROOT / "experiments"
-    return [base / "profile_manifest.sha256", base / "model_asset_manifest.sha256", base / "model_reference_manifest.sha256"]
+    return [base / "profile_manifest.sha256", base / "model_asset_manifest.sha256", base / "model_reference_manifest.sha256", base / "runtime_asset_manifest.sha256"]
 
 
 def preflight() -> dict[str, Any]:

@@ -1,0 +1,11 @@
+	linux-vdso.so.1 (0x00007ffc60bf5000)
+	libc10.so => not found
+	libcudart.so.11.0 => /usr/local/cuda-11.6/targets/x86_64-linux/lib/libcudart.so.11.0 (0x00007f4a54d3a000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f4a54b58000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f4a54b3d000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4a5494b000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f4a55018000)
+	libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f4a54945000)
+	libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f4a54920000)
+	librt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f4a54916000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4a547c7000)

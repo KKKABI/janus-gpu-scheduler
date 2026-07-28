@@ -29,7 +29,9 @@
     "pretrainedmodels": "0.7.4",
     "ultralytics": "8.4.41",
     "cudnn_benchmark": false,
-    "cudnn_deterministic": false
+    "cudnn_deterministic": false,
+    "priority_streams_binary": "Opara/priority_streams.cpython-310-x86_64-linux-gnu.so",
+    "priority_streams_source": "PriorityOpara_v0 working-tree snapshot"
   },
   "hardware": {
     "hostname": "ubuntu108",

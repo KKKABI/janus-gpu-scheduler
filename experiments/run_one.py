@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import sys
 import time
@@ -119,6 +120,7 @@ def main() -> int:
     task = Task(args.model, args.variant, alpha, args.repeat_index)
     output_dir = args.output_dir.resolve(); output_dir.mkdir(parents=True, exist_ok=True)
     status_path = output_dir / "status.json"; started = time.time()
+    os.chdir(output_dir)
     write_json_atomic(status_path, {"status": "running", "task": task.to_dict(), "started_unix": started})
     try:
         expected_python = Path(config["environment"]["python_executable"]).resolve()

@@ -12,7 +12,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from harness_common import CONFIG_PATH, Task, expected_profile_path, gpu_snapshot, load_config, require_idle_gpu, runtime_metadata, sha256_file, stats_from_samples, write_json_atomic
+from harness_common import CONFIG_PATH, REPO_ROOT, Task, expected_profile_path, gpu_snapshot, load_config, require_idle_gpu, runtime_metadata, sha256_file, stats_from_samples, write_json_atomic
+
+sys.path.insert(0, str(REPO_ROOT))
 
 
 def parse_args() -> argparse.Namespace:

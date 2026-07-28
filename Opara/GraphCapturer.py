@@ -74,24 +74,28 @@ class Scheduler(Interpreter):
             
 
 
-def compute_max_parallel_width(fx_module: torch.fx.GraphModule) -> int:
+def compute_max_parallel_width(fx_module: torch.fx.GraphModule, excluded_ops=None) -> int:
     graph = fx_module.graph
+    excluded_ops = set(excluded_ops or ())
+    active_nodes = [node for node in graph.nodes if node.op not in excluded_ops]
+    active_set = set(active_nodes)
     node_to_users = defaultdict(set)
     node_to_deps = defaultdict(set)
 
     # Map nodes to their dependencies and users
-    for node in graph.nodes:
+    for node in active_nodes:
         for arg in node.all_input_nodes:
+            if arg not in active_set: continue
             node_to_users[arg].add(node)
             node_to_deps[node].add(arg)
 
     # Topological level tracking
-    in_degree = {node: len(node_to_deps[node]) for node in graph.nodes}
+    in_degree = {node: len(node_to_deps[node]) for node in active_nodes}
     level_count = defaultdict(int)
     queue = deque()
 
     # Start with nodes with zero dependencies
-    for node in graph.nodes:
+    for node in active_nodes:
         if in_degree[node] == 0:
             queue.append((node, 0))
             level_count[0] += 1
@@ -112,28 +116,36 @@ def compute_max_parallel_width(fx_module: torch.fx.GraphModule) -> int:
             
 
 
-def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mode='cosine', time_domain=True):
+def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mode='cosine', time_domain=True, capture_backend='dynamo_explain'):
     assert isinstance(inputs, (list, tuple)), f"inputs is of type {type(inputs)} instead of list"
     static_inputs = [torch.zeros_like(x, device='cuda') for x in inputs]
 
-    dynamo.reset()
-    with torch.no_grad():
-        result = dynamo.explain(model)(*inputs)
-        if isinstance(result, tuple):
-            explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose = result
-        else:
-            explanation = getattr(result, "explanation", None)
-            out_guards = getattr(result, "out_guards", None)
-            graphs = getattr(result, "graphs", None) or getattr(result, "graph", None)
-            ops_per_graph = getattr(result, "ops_per_graph", None)
-            break_reasons = getattr(result, "break_reasons", None)
-            explanation_verbose = getattr(result, "explanation_verbose", None)
-    fx_module = graphs[0]
+    if capture_backend == 'make_fx':
+        from torch.fx.experimental.proxy_tensor import make_fx
+        with torch.no_grad():
+            fx_module = make_fx(model)(*inputs)
+    elif capture_backend == 'dynamo_explain':
+        dynamo.reset()
+        with torch.no_grad():
+            result = dynamo.explain(model)(*inputs)
+            if isinstance(result, tuple):
+                explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose = result
+            else:
+                explanation = getattr(result, "explanation", None)
+                out_guards = getattr(result, "out_guards", None)
+                graphs = getattr(result, "graphs", None) or getattr(result, "graph", None)
+                ops_per_graph = getattr(result, "ops_per_graph", None)
+                break_reasons = getattr(result, "break_reasons", None)
+                explanation_verbose = getattr(result, "explanation_verbose", None)
+        fx_module = graphs[0]
+    else:
+        raise ValueError(f"unsupported capture backend: {capture_backend}")
     # print(fx_module.graph, file=output_file)
     fx_module.cuda()
     model_class_name = model.__class__.__name__
     
-    max_width = compute_max_parallel_width(fx_module)
+    excluded_ops = {'placeholder', 'get_attr'} if capture_backend == 'make_fx' else set()
+    max_width = compute_max_parallel_width(fx_module, excluded_ops)
 
     print("max_width :" , max_width)
    
@@ -160,7 +172,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
         node.event = Event()
 
     Critical_node.mark_critical_nodes(graph)
-    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, alpha, selection_mode, time_domain)
+    OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, alpha, selection_mode, time_domain, exclude_metadata=bool(excluded_ops))
 
     # print(stream for stream in all_streams)
         
@@ -216,7 +228,8 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
         with torch.no_grad():
             g.replay()
         if copy_outputs:
-            return [x.clone() for x in static_outputs]
+            from torch.utils._pytree import tree_map
+            return tree_map(lambda value: value.clone() if isinstance(value, torch.Tensor) else value, static_outputs)
         else:
             return static_outputs
 

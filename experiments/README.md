@@ -2,6 +2,8 @@
 
 Model construction, weights, inputs, warm-up counts and iteration counts follow the matching files under `/public_0/LYX/PriorityOpara_v0/examples`.
 
+Exception: the reference `yolov8_example.py` captures only `model.model[0]`, which is one Conv block. The corrected `YOLOv8x` task captures the complete Ultralytics `DetectionModel` and uses the matching frozen `DetectionModel_...trace.json` profile. Old BackboneWrapper results remain historical proxy data and must not be labeled as full YOLOv8x.
+
 Activate the frozen environment and enter the isolated worktree:
 
     source /usr/local/Anaconda3/etc/profile.d/conda.sh

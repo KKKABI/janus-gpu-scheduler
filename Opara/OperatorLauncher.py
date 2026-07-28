@@ -9,6 +9,7 @@ from Opara.Scheduler import (Scheduler, OperatorTask, KernelProfile,
                              ResourceModel, VirtualSM,
                              clear_candidate_stats, dump_candidate_stats)
 import os
+import re
 path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
 output_file = open(output_file_path, "w")
@@ -281,7 +282,8 @@ def get_resource_from_json(path):
 
     step_num = 0
     for event in data["traceEvents"]:
-        if "torch/fx/interpreter.py(97): run" in event["name"] and "run_node" not in event["name"]:
+        event_name = event.get("name", "")
+        if re.search(r"torch/fx/interpreter\.py\(\d+\): run$", event_name) and "run_node" not in event_name:
             step_num += 1
     # print("step_num", step_num)
     # 获取run_node事件、kernel_launch事件、kernel事件
@@ -351,7 +353,7 @@ def get_topo(fx_nodes):
            in_degree[node] += 1
     return nodes , in_degree
 
-def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9, selection_mode='cosine', time_domain=True):
+def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9, selection_mode='cosine', time_domain=True, exclude_metadata=False):
     
     path = os.path.abspath(os.path.dirname(__file__))
     # model_class_name = graph_module.__class__.__name__
@@ -386,15 +388,25 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, al
        
 
     torch_nodes , in_degree = get_topo(graph_module.graph.nodes)
-
-    result = launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, alpha, selection_mode, time_domain)
+    all_torch_nodes = dict(torch_nodes)
+    result = []
+    if exclude_metadata:
+        metadata_nodes = [node for node in graph_module.graph.nodes if node.op in {'placeholder', 'get_attr'}]
+        for node in metadata_nodes:
+            node.stream = all_streams[0]
+            result.append(node.name)
+            for user in node.users:
+                in_degree[user] -= 1
+            del torch_nodes[node.name]
+            del in_degree[node]
+    result.extend(launch(torch_nodes , in_degree, sharedMemPerMultiprocessor, regsPerMultiprocessor, maxThreadsPerMultiprocessor, numSms , all_streams, max_width, alpha, selection_mode, time_domain))
 
     # for stream in all_streams:
     #     print(stream)
         
     size = len(result)
     for i in range(size - 1):
-        torch_nodes[result[i]].append(torch_nodes[result[i+1]])
+        all_torch_nodes[result[i]].append(all_torch_nodes[result[i+1]])
     
     graph_module.graph.lint()
     graph_module.recompile()

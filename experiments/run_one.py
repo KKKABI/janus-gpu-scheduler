@@ -54,13 +54,7 @@ def load_model_and_inputs(name: str, config: dict[str, Any]):
         inputs = (torch.randint(0, 256, (1, 3, 331, 331), dtype=torch.float32, device="cuda:0"),)
     elif name == "YOLOv8x":
         from ultralytics import YOLO
-        class BackboneWrapper(torch.nn.Module):
-            def __init__(self, wrapped):
-                super().__init__(); self.backbone = wrapped.model[0]
-            def forward(self, image):
-                return self.backbone(image)
-        yolo_model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model.eval().cuda()
-        model = BackboneWrapper(yolo_model)
+        model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model
         inputs = (torch.randn((1, 3, 320, 320), device="cuda:0"),)
     elif name == "ConvNeXt":
         import torchvision
@@ -151,12 +145,16 @@ def main() -> int:
             raise RuntimeError(f"frozen profile is missing; refusing automatic generation: {profile}")
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
-        runner = GraphCapturer.capturer(inputs, model, copy_outputs=False, alpha=params["internal_alpha"], selection_mode=params["selection_mode"], time_domain=params["time_domain"])
+        capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
+        capture_started = time.perf_counter()
+        runner = GraphCapturer.capturer(inputs, model, copy_outputs=False, alpha=params["internal_alpha"], selection_mode=params["selection_mode"], time_domain=params["time_domain"], capture_backend=capture_backend)
+        capture_build_seconds = time.perf_counter() - capture_started
         from Opara.Scheduler import get_candidate_stats
         scheduler_calls = get_candidate_stats(clear=True)
         total_enumerated = sum(item["enumerated_count"] for item in scheduler_calls)
         total_feasible = sum(item["feasible_count"] for item in scheduler_calls)
         scheduler_summary = {
+            "capture_build_seconds": capture_build_seconds,
             "call_count": len(scheduler_calls),
             "enumerated_count": total_enumerated,
             "feasible_count": total_feasible,

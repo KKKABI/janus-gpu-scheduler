@@ -5,7 +5,12 @@
     "worktree": "/public_0/LYX/janus_repro",
     "branch": "experiment/td-drt-repro",
     "upstream_base_commit": "6d4d4fc061f121cd61b0e669a7fa5184752841e4",
-    "code_snapshot_commit": "fea25ed"
+    "code_snapshot_commit": "fea25ed",
+    "baseline_reference_commit": "73f4da51354a554f4abee476ad1a57a6e6a5af42",
+    "model_reference_root": "/public_0/LYX/PriorityOpara_v0/examples",
+    "model_reference_git_commit": "663876f6713df2fe2fdababaf4d77178d4701ce4",
+    "model_reference_worktree_dirty": true,
+    "model_reference_snapshot_root": "/public_0/LYX/janus_repro/experiments/model_references"
   },
   "environment": {
     "activation": [
@@ -42,8 +47,6 @@
   "measurement": {
     "seed": 20260728,
     "batch_size": 1,
-    "warmup_iterations": 50,
-    "timed_iterations": 100,
     "independent_process_repeats": 5,
     "timer": "cuda_event",
     "synchronize_after_warmup": true,
@@ -59,13 +62,15 @@
       "per_process_max"
     ],
     "configuration_order": "seeded_shuffle(seed + repeat_index)",
-    "one_gpu_process_at_a_time": true
+    "one_gpu_process_at_a_time": true,
+    "per_model_warmup_and_iterations": true,
+    "pre_sample_cuda_sleep_cycles": 1000000
   },
   "correctness": {
     "reference": "eager_model_same_state_same_input",
     "inference_mode": true,
     "float_rtol": 0.0001,
-    "float_atol": 0.00001,
+    "float_atol": 1e-05,
     "integer_and_boolean_exact": true,
     "abort_on_mismatch": true,
     "abort_on_non_finite": true
@@ -77,52 +82,228 @@
     0.2
   ],
   "variants": [
-    {"label": "Baseline", "simulator": null, "score": null, "alpha": null},
-    {"label": "Static+Cos", "simulator": "static", "score": "cosine", "alpha": "alpha_grid"},
-    {"label": "TD+Cos", "simulator": "td", "score": "cosine", "alpha": "alpha_grid"},
-    {"label": "Static+DRT", "simulator": "static", "score": "drt_no_alpha", "alpha": null},
-    {"label": "TD+DRT", "simulator": "td", "score": "drt_no_alpha", "alpha": null},
-    {"label": "Static+MinRes", "simulator": "static", "score": "min_resource", "alpha": "alpha_grid", "role": "secondary"},
-    {"label": "TD+MinRes", "simulator": "td", "score": "min_resource", "alpha": "alpha_grid", "role": "secondary"}
+    {
+      "label": "Baseline",
+      "simulator": "static",
+      "score": "legacy_balance",
+      "alpha": null,
+      "internal_alpha": 0.9,
+      "reference_commit": "73f4da51354a554f4abee476ad1a57a6e6a5af42"
+    },
+    {
+      "label": "Static+Cos",
+      "simulator": "static",
+      "score": "cosine",
+      "alpha": "alpha_grid"
+    },
+    {
+      "label": "TD+Cos",
+      "simulator": "td",
+      "score": "cosine",
+      "alpha": "alpha_grid"
+    },
+    {
+      "label": "Static+DRT",
+      "simulator": "static",
+      "score": "drt_no_alpha",
+      "alpha": null
+    },
+    {
+      "label": "TD+DRT",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null
+    },
+    {
+      "label": "Static+MinRes",
+      "simulator": "static",
+      "score": "min_resource",
+      "alpha": "alpha_grid",
+      "role": "secondary"
+    },
+    {
+      "label": "TD+MinRes",
+      "simulator": "td",
+      "score": "min_resource",
+      "alpha": "alpha_grid",
+      "role": "secondary"
+    }
   ],
   "models": {
     "GoogLeNet": {
       "role": "primary",
-      "constructor": "torchvision.models.googlenet(weights=None)",
-      "inputs": [{"name": "image", "shape": [1, 3, 224, 224], "dtype": "float32"}]
+      "reference": "googlenet_example.py",
+      "constructor": "torchvision.models.googlenet()",
+      "inputs": [
+        {
+          "name": "image",
+          "shape": [
+            1,
+            3,
+            224,
+            224
+          ],
+          "dtype": "float32",
+          "generator": "torch.randint",
+          "range": [
+            0,
+            256
+          ]
+        }
+      ],
+      "warmup_iterations": 10,
+      "timed_iterations": 300,
+      "profile_file": "GoogLeNet_torch.Size([1, 3, 224, 224]).pt.trace.json"
     },
     "Inception-v3": {
       "role": "primary",
-      "constructor": "torchvision.models.inception_v3(weights=None)",
-      "inputs": [{"name": "image", "shape": [1, 3, 299, 299], "dtype": "float32"}]
+      "reference": "inceptionv3_example.py",
+      "constructor": "torchvision.models.inception_v3(pretrained=True)",
+      "inputs": [
+        {
+          "name": "image",
+          "shape": [
+            1,
+            3,
+            299,
+            299
+          ],
+          "dtype": "float32",
+          "generator": "torch.randint",
+          "range": [
+            0,
+            256
+          ]
+        }
+      ],
+      "warmup_iterations": 100,
+      "timed_iterations": 300,
+      "profile_file": "Inception3_torch.Size([1, 3, 299, 299]).pt.trace.json"
     },
     "BERT": {
       "role": "primary",
+      "reference": "bert_example.py",
       "constructor": "BertModel.from_pretrained('/public_0/ZYF/model/bert-base')",
-      "inputs": [{"name": "input_ids", "shape": [1, 16], "dtype": "int64", "range": [0, 30522]}]
+      "inputs": [
+        {
+          "name": "input_ids",
+          "shape": [
+            1,
+            16
+          ],
+          "dtype": "int64",
+          "generator": "torch.randint",
+          "range": [
+            0,
+            30000
+          ]
+        },
+        {
+          "name": "attention_mask",
+          "shape": [
+            1,
+            16
+          ],
+          "dtype": "int64",
+          "generator": "torch.ones"
+        }
+      ],
+      "warmup_iterations": 10,
+      "timed_iterations": 300,
+      "profile_file": "BertModel_torch.Size([1, 16])_torch.Size([1, 16]).pt.trace.json"
     },
     "NASNet": {
       "role": "primary",
+      "reference": "nasnet_example.py",
       "constructor": "pretrainedmodels.__dict__['nasnetalarge'](num_classes=1000, pretrained='imagenet')",
-      "inputs": [{"name": "image", "shape": [1, 3, 331, 331], "dtype": "float32"}]
+      "inputs": [
+        {
+          "name": "image",
+          "shape": [
+            1,
+            3,
+            331,
+            331
+          ],
+          "dtype": "float32",
+          "generator": "torch.randint",
+          "range": [
+            0,
+            256
+          ]
+        }
+      ],
+      "warmup_iterations": 100,
+      "timed_iterations": 300,
+      "profile_file": "NASNetALarge_torch.Size([1, 3, 331, 331]).pt.trace.json"
     },
     "YOLOv8x": {
       "role": "primary",
-      "constructor": "YOLO('/public_0/ZYF/model/YOLOv8/yolov8x.pt').model",
-      "inputs": [{"name": "image", "shape": [1, 3, 640, 640], "dtype": "float32"}]
+      "reference": "yolov8_example.py",
+      "constructor": "BackboneWrapper(YOLO('/public_0/ZYF/model/YOLOv8/yolov8x.pt').model), wrapping model.model[0]",
+      "inputs": [
+        {
+          "name": "image",
+          "shape": [
+            1,
+            3,
+            320,
+            320
+          ],
+          "dtype": "float32",
+          "generator": "torch.randn"
+        }
+      ],
+      "warmup_iterations": 10,
+      "timed_iterations": 100,
+      "profile_file": "BackboneWrapper_torch.Size([1, 3, 320, 320]).pt.trace.json"
     },
     "ConvNeXt": {
       "role": "primary",
-      "constructor": "torchvision.models.convnext_tiny(weights=None)",
-      "inputs": [{"name": "image", "shape": [1, 3, 224, 224], "dtype": "float32"}]
+      "reference": "convnext_example.py",
+      "constructor": "torchvision.models.convnext_base(pretrained=False)",
+      "inputs": [
+        {
+          "name": "image",
+          "shape": [
+            1,
+            3,
+            224,
+            224
+          ],
+          "dtype": "float32",
+          "generator": "torch.randn"
+        }
+      ],
+      "warmup_iterations": 10,
+      "timed_iterations": 300,
+      "profile_file": "ConvNeXt_torch.Size([1, 3, 224, 224]).pt.trace.json"
     },
     "DeepFM": {
       "role": "secondary",
       "constructor": "examples.NCF.DeepFM(cate=[100*(i+1) for i in range(32)], num_cont=16, emb_size=8, hid_dims=[256,128], num_classes=1, dropout=[0.2,0.2])",
       "inputs": [
-        {"name": "categorical", "shape": [1, 32], "dtype": "int64"},
-        {"name": "continuous", "shape": [1, 16], "dtype": "float32"}
-      ]
+        {
+          "name": "categorical",
+          "shape": [
+            1,
+            32
+          ],
+          "dtype": "int64"
+        },
+        {
+          "name": "continuous",
+          "shape": [
+            1,
+            16
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "reference": "deepfm_example.py",
+      "warmup_iterations": 100,
+      "timed_iterations": 3000,
+      "profile_file": "DeepFM_torch.Size([1, 32])_torch.Size([1, 16]).pt.trace.json"
     }
   }
 }

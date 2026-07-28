@@ -306,7 +306,7 @@ class Scheduler:
     def __init__(self, resource_model, alpha=0.9, selection_mode='cosine', time_domain=True):
         self.resource_model = resource_model
         self.alpha = alpha
-        self.selection_mode = selection_mode  # 'cosine' | 'min_resource' | 'max_occupancy' | 'static_interference'
+        self.selection_mode = selection_mode  # cosine | min_resource | max_occupancy | static_interference | legacy_balance
         self.overload_weight = float(os.getenv('JANUS_OVERLOAD_WEIGHT', '1.0'))
         self.tail_weight = float(os.getenv('JANUS_TAIL_WEIGHT', '0.02'))
         self.occupancy_weight = float(os.getenv('JANUS_OCCUPANCY_WEIGHT', '0.005'))
@@ -446,6 +446,29 @@ class Scheduler:
         )
 
         # ===== 选择策略 =====
+        if self.selection_mode == 'legacy_balance':
+            # Compatibility branch for baseline commit 73f4da5.
+            memory_intensive_ops = [
+                'add', 'cast', 'ceil', 'clip', 'concat', 'exp', 'floor', 'log',
+                'gelu', 'neg', 'pow', 'reciprocal', 'relu', 'sigmoid', 'slice', 'relu'
+                'sqrt', 'sub', 'tanh', 'transpose', 'unsqueeze', 'view', 'avg_pool',
+                'reshape', 'max_pool', 'adaptive_avg_pool', 'adaptive_max_pool', 'premute',
+                'flatten', 'dropout', 'batch_norm', 'layer_norm', 'instance_norm',
+                'contiguous', 'ones', 'to'
+            ]
+
+            def is_mem_access_intensive(op_name):
+                name = op_name.lower()
+                return any(token in name for token in memory_intensive_ops)
+
+            def legacy_imbalance_score(combo):
+                memory_count = sum(is_mem_access_intensive(op.name) for op in combo)
+                compute_count = len(combo) - memory_count
+                occupancy = next(score for candidate, score in combo_scores if candidate == combo)
+                return abs(compute_count - memory_count), -occupancy
+
+            return min(top_candidates, key=legacy_imbalance_score)
+
         if self.selection_mode == 'static_interference':
             return self._select_static_interference(ready_ops, combo_scores)
 

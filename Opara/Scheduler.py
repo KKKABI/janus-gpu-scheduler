@@ -443,12 +443,14 @@ class Scheduler:
         combo_scores = []  # list of (combo_list, occupancy_score)
 
         max_comb_size = min(5, len(ready_ops))
-        # 防止组合爆炸：max_width > 15 时截断，否则 C(83,5) ≈ 3000万无法接受
-        MAX_READY = 15
-        if max_comb_size == 5 and len(ready_ops) > MAX_READY:
+        # 防止组合爆炸：默认最多使用15个ready算子；实验可通过环境变量调整。
+        max_ready = int(os.environ.get("OPARA_MAX_READY", "15"))
+        if max_ready < 5:
+            raise ValueError(f"OPARA_MAX_READY must be >= 5, got {max_ready}")
+        if max_comb_size == 5 and len(ready_ops) > max_ready:
             ready_ops = sorted(ready_ops, key=lambda op: sum(
                 k.duration for k in op.kernels
-            ), reverse=True)[:MAX_READY]
+            ), reverse=True)[:max_ready]
         ready_used_names = [op.name for op in ready_ops]
         max_comb_size = min(5, len(ready_ops))
         theoretical_count = sum(

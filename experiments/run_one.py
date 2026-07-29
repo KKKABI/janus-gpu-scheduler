@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alpha", default="none")
     parser.add_argument("--repeat-index", required=True, type=int)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--max-ready", default=15, type=int)
     return parser.parse_args()
 
 
@@ -124,6 +125,8 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args(); config = load_config()
+    if args.max_ready < 5: raise ValueError(f"--max-ready must be >= 5, got {args.max_ready}")
+    os.environ["OPARA_MAX_READY"] = str(args.max_ready)
     alpha = None if args.alpha.lower() == "none" else float(args.alpha)
     task = Task(args.model, args.variant, alpha, args.repeat_index)
     output_dir = args.output_dir.resolve(); output_dir.mkdir(parents=True, exist_ok=True)
@@ -145,6 +148,7 @@ def main() -> int:
             raise RuntimeError(f"frozen profile is missing; refusing automatic generation: {profile}")
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
+        params["max_ready"] = args.max_ready
         capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
         capture_started = time.perf_counter()
         runner = GraphCapturer.capturer(inputs, model, copy_outputs=False, alpha=params["internal_alpha"], selection_mode=params["selection_mode"], time_domain=params["time_domain"], capture_backend=capture_backend)
@@ -155,10 +159,20 @@ def main() -> int:
         total_feasible = sum(item["feasible_count"] for item in scheduler_calls)
         scheduler_summary = {
             "capture_build_seconds": capture_build_seconds,
+            "max_ready": args.max_ready,
             "call_count": len(scheduler_calls),
             "enumerated_count": total_enumerated,
             "feasible_count": total_feasible,
             "pass_rate": total_feasible / total_enumerated if total_enumerated else 0.0,
+            "truncated_call_count": sum(
+                item["ready_count"] > item["ready_used_count"] for item in scheduler_calls
+            ),
+            "observed_max_ready_count": max(
+                (item["ready_count"] for item in scheduler_calls), default=0
+            ),
+            "observed_max_ready_used_count": max(
+                (item["ready_used_count"] for item in scheduler_calls), default=0
+            ),
             "single_scoring_candidate_calls": sum(
                 item["scoring_candidate_count"] == 1 for item in scheduler_calls
             ),

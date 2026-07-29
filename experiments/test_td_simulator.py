@@ -91,6 +91,62 @@ class TimeDomainSimulatorTests(unittest.TestCase):
 
         self.assertEqual(stats[0]["enumerated_count"], 7)
         self.assertEqual(stats[0]["feasible_count"], 6)
+        self.assertEqual(stats[0]["candidate_score_kind"], "initial_occupancy")
+        self.assertEqual(stats[0]["final_score_kind"], "predicted_speedup")
+        self.assertEqual(stats[0]["candidate_score_max"], 1.0)
+        self.assertEqual(
+            stats[0]["selected_timeline"]["predicted_speedup"], 2.0
+        )
+
+    def test_shared_timeline_runs_large_grid_in_waves(self):
+        model = ResourceModel(1, SM_SPECS, time_domain=True)
+        large = make_operator("large", blocks=5, warps=2)
+
+        metrics = model.simulate_combo_timeline([large], 0.0)
+
+        self.assertTrue(metrics["feasible"])
+        self.assertEqual(metrics["initial_resident_blocks"]["large"], 2)
+        self.assertEqual(metrics["event_count"], 3)
+        self.assertEqual(metrics["makespan"], 3.0)
+        self.assertAlmostEqual(metrics["average_utilization"], 5.0 / 6.0)
+
+    def test_shared_timeline_keeps_operator_kernels_sequential(self):
+        model = ResourceModel(1, SM_SPECS, time_domain=True)
+        operator_a = OperatorTask("a", [
+            KernelProfile("a0", 1.0, 0, 0, 2, 2),
+            KernelProfile("a1", 2.0, 0, 0, 4, 1),
+        ])
+        operator_b = make_operator("b", blocks=1, warps=2)
+        operator_b.kernels[0].duration = 2.0
+
+        metrics = model.simulate_combo_timeline(
+            [operator_a, operator_b], 0.0
+        )
+
+        self.assertTrue(metrics["feasible"])
+        self.assertEqual(metrics["makespan"], 4.0)
+        self.assertEqual(metrics["operator_completion_times"]["b"], 2.0)
+        self.assertEqual(metrics["operator_completion_times"]["a"], 4.0)
+        self.assertGreater(metrics["overlap_duration"], 0.0)
+
+    def test_shared_timeline_is_independent_of_candidate_order(self):
+        operators = [
+            make_operator("a", blocks=5, warps=1),
+            make_operator("b", blocks=3, warps=2),
+        ]
+        forward = ResourceModel(
+            2, SM_SPECS, time_domain=True
+        ).simulate_combo_timeline(operators, 0.0)
+        reverse = ResourceModel(
+            2, SM_SPECS, time_domain=True
+        ).simulate_combo_timeline(list(reversed(operators)), 0.0)
+
+        self.assertEqual(forward["feasible"], reverse["feasible"])
+        self.assertEqual(forward["makespan"], reverse["makespan"])
+        self.assertEqual(
+            forward["average_utilization"],
+            reverse["average_utilization"],
+        )
 
 
 if __name__ == "__main__":

@@ -107,6 +107,92 @@ class VirtualSM:
         return self.warps_used / self.warp_total if self.warp_total > 0 else 0.0
 
 
+class _TimelineSM:
+    """Batch-oriented SM state used by candidate-level TD simulation."""
+
+    def __init__(self, source: VirtualSM):
+        self.shared_mem_total = source.shared_mem_total
+        self.register_total = source.register_total
+        self.warp_total = source.warp_total
+        self.shared_mem_used = source.shared_mem_used
+        self.registers_used = source.registers_used
+        self.warps_used = source.warps_used
+        self.running_batches = []
+        for end_time, kernel_name, block_resource in source.running_blocks:
+            self.running_batches.append({
+                "end_time": float(end_time),
+                "owner": None,
+                "kernel_index": None,
+                "kernel_name": kernel_name,
+                "resource": block_resource,
+                "count": 1,
+            })
+
+    def can_accept(self, block_resource) -> bool:
+        return (
+            self.shared_mem_used + block_resource["shared_mem"] <= self.shared_mem_total and
+            self.registers_used + block_resource["registers"] <= self.register_total and
+            self.warps_used + block_resource["warps"] <= self.warp_total
+        )
+
+    def max_blocks_fit(self, block_resource):
+        limits = []
+        for used, total, key in (
+                (self.shared_mem_used, self.shared_mem_total, "shared_mem"),
+                (self.registers_used, self.register_total, "registers"),
+                (self.warps_used, self.warp_total, "warps")):
+            amount = block_resource[key]
+            if amount > 0:
+                limits.append((total - used) // amount)
+        return min(limits) if limits else float("inf")
+
+    def allocate_batch(self, owner, kernel_index, kernel, start_time, count):
+        if count <= 0:
+            return
+        block_resource = ResourceModel._block_resource(kernel)
+        max_fit = self.max_blocks_fit(block_resource)
+        assert max_fit == float("inf") or count <= max_fit
+        self.shared_mem_used += block_resource["shared_mem"] * count
+        self.registers_used += block_resource["registers"] * count
+        self.warps_used += block_resource["warps"] * count
+        self.running_batches.append({
+            "end_time": float(start_time) + max(float(kernel.duration), 0.0),
+            "owner": owner,
+            "kernel_index": kernel_index,
+            "kernel_name": kernel.name,
+            "resource": block_resource,
+            "count": int(count),
+        })
+
+    def undo_last_batch(self):
+        batch = self.running_batches.pop()
+        block_resource = batch["resource"]
+        count = batch["count"]
+        self.shared_mem_used -= block_resource["shared_mem"] * count
+        self.registers_used -= block_resource["registers"] * count
+        self.warps_used -= block_resource["warps"] * count
+
+    def release_at(self, current_time):
+        released = []
+        still_running = []
+        epsilon = 1e-12
+        for batch in self.running_batches:
+            if batch["end_time"] <= current_time + epsilon:
+                block_resource = batch["resource"]
+                count = batch["count"]
+                self.shared_mem_used -= block_resource["shared_mem"] * count
+                self.registers_used -= block_resource["registers"] * count
+                self.warps_used -= block_resource["warps"] * count
+                released.append(batch)
+            else:
+                still_running.append(batch)
+        self.running_batches = still_running
+        return released
+
+    def get_utilization(self):
+        return self.warps_used / self.warp_total if self.warp_total > 0 else 0.0
+
+
 
 # -------------------------------
 # ResourceModel
@@ -252,6 +338,377 @@ class ResourceModel:
 
         self.sms = virtual_sms
         return True
+
+    @staticmethod
+    def _advance_timeline_entries(entries, current_time):
+        for entry in entries:
+            while (
+                    entry["kernel_index"] < len(entry["kernels"]) and
+                    entry["remaining"][entry["kernel_index"]] == 0 and
+                    entry["inflight"] == 0):
+                entry["kernel_index"] += 1
+            if entry["kernel_index"] >= len(entry["kernels"]):
+                if entry["completion_time"] is None:
+                    entry["completion_time"] = float(current_time)
+
+    def _make_timeline_entries(
+            self, operators, start_time, copy_kernels=True):
+        entries = []
+        ordered_operators = sorted(
+            enumerate(operators),
+            key=lambda item: (item[1].name, item[0]),
+        )
+        for _, operator in ordered_operators:
+            kernels = (
+                copy.deepcopy(operator.kernels)
+                if copy_kernels else list(operator.kernels)
+            )
+            remaining = [
+                max(0, int(kernel.blocks_remaining)) for kernel in kernels
+            ]
+            entries.append({
+                "name": operator.name,
+                "kernels": kernels,
+                "remaining": remaining,
+                "kernel_index": 0,
+                "inflight": 0,
+                "completion_time": None,
+            })
+        self._advance_timeline_entries(entries, start_time)
+        return entries
+
+    def _timeline_initial_admission(self, sms, entries, start_time):
+        active = [
+            entry_index for entry_index, entry in enumerate(entries)
+            if entry["kernel_index"] < len(entry["kernels"])
+        ]
+        if not active:
+            return True
+        if not sms:
+            return False
+        sample_sm = sms[0]
+        ordered = sorted(
+            active,
+            key=lambda entry_index: (
+                self._kernel_admission_pressure(
+                    entries[entry_index]["kernels"][
+                        entries[entry_index]["kernel_index"]
+                    ],
+                    sample_sm,
+                ),
+                entries[entry_index]["name"],
+            ),
+            reverse=True,
+        )
+
+        def place(order_index):
+            if order_index == len(ordered):
+                return True
+            entry_index = ordered[order_index]
+            entry = entries[entry_index]
+            kernel_index = entry["kernel_index"]
+            kernel = entry["kernels"][kernel_index]
+            block_resource = self._block_resource(kernel)
+            seen_sm_states = set()
+            for sm in sms:
+                state = (
+                    sm.shared_mem_used,
+                    sm.registers_used,
+                    sm.warps_used,
+                )
+                if state in seen_sm_states:
+                    continue
+                seen_sm_states.add(state)
+                if not sm.can_accept(block_resource):
+                    continue
+                sm.allocate_batch(
+                    entry_index, kernel_index, kernel, start_time, 1
+                )
+                if place(order_index + 1):
+                    return True
+                sm.undo_last_batch()
+            return False
+
+        if not place(0):
+            return False
+        for entry_index in active:
+            entry = entries[entry_index]
+            kernel_index = entry["kernel_index"]
+            entry["remaining"][kernel_index] -= 1
+            entry["inflight"] += 1
+        return True
+
+    @staticmethod
+    def _timeline_full_cycles(sm, entries, entry_indices):
+        if not entry_indices:
+            return 0
+        limits = []
+        resource_per_cycle = {
+            "shared_mem": 0,
+            "registers": 0,
+            "warps": 0,
+        }
+        for entry_index in entry_indices:
+            entry = entries[entry_index]
+            kernel_index = entry["kernel_index"]
+            kernel = entry["kernels"][kernel_index]
+            limits.append(entry["remaining"][kernel_index])
+            block_resource = ResourceModel._block_resource(kernel)
+            for key in resource_per_cycle:
+                resource_per_cycle[key] += block_resource[key]
+        for used, total, key in (
+                (sm.shared_mem_used, sm.shared_mem_total, "shared_mem"),
+                (sm.registers_used, sm.register_total, "registers"),
+                (sm.warps_used, sm.warp_total, "warps")):
+            amount = resource_per_cycle[key]
+            if amount > 0:
+                limits.append((total - used) // amount)
+        return max(0, int(min(limits))) if limits else 0
+
+    def _timeline_fill_available(self, sms, entries, current_time, rotation=0):
+        """Launch currently available blocks in fair, batched SM-local rounds."""
+        launched = 0
+        n_entries = len(entries)
+        if n_entries == 0:
+            return launched
+        for sm_index, sm in enumerate(sms):
+            while True:
+                ordered_indices = [
+                    (rotation + sm_index + offset) % n_entries
+                    for offset in range(n_entries)
+                ]
+                launchable = []
+                for entry_index in ordered_indices:
+                    entry = entries[entry_index]
+                    kernel_index = entry["kernel_index"]
+                    if kernel_index >= len(entry["kernels"]):
+                        continue
+                    if entry["remaining"][kernel_index] <= 0:
+                        continue
+                    kernel = entry["kernels"][kernel_index]
+                    if sm.can_accept(self._block_resource(kernel)):
+                        launchable.append(entry_index)
+                if not launchable:
+                    break
+
+                full_cycles = self._timeline_full_cycles(
+                    sm, entries, launchable
+                )
+                if full_cycles > 0:
+                    for entry_index in launchable:
+                        entry = entries[entry_index]
+                        kernel_index = entry["kernel_index"]
+                        kernel = entry["kernels"][kernel_index]
+                        sm.allocate_batch(
+                            entry_index,
+                            kernel_index,
+                            kernel,
+                            current_time,
+                            full_cycles,
+                        )
+                        entry["remaining"][kernel_index] -= full_cycles
+                        entry["inflight"] += full_cycles
+                        launched += full_cycles
+                    continue
+
+                made_progress = False
+                for entry_index in launchable:
+                    entry = entries[entry_index]
+                    kernel_index = entry["kernel_index"]
+                    if entry["remaining"][kernel_index] <= 0:
+                        continue
+                    kernel = entry["kernels"][kernel_index]
+                    if not sm.can_accept(self._block_resource(kernel)):
+                        continue
+                    sm.allocate_batch(
+                        entry_index, kernel_index, kernel, current_time, 1
+                    )
+                    entry["remaining"][kernel_index] -= 1
+                    entry["inflight"] += 1
+                    launched += 1
+                    made_progress = True
+                if not made_progress:
+                    break
+        return launched
+
+    @staticmethod
+    def _timeline_utilization(sms):
+        if not sms:
+            return 0.0
+        return sum(sm.get_utilization() for sm in sms) / len(sms)
+
+    @staticmethod
+    def _timeline_active_owners(sms):
+        return {
+            batch["owner"]
+            for sm in sms
+            for batch in sm.running_batches
+            if batch["owner"] is not None
+        }
+
+    def evaluate_initial_combo(self, operators, start_time: float):
+        """Fast stage-1 admission and occupancy evaluation for all candidates."""
+        sms = [_TimelineSM(sm) for sm in self.sms]
+        entries = self._make_timeline_entries(
+            operators, start_time, copy_kernels=False
+        )
+        for entry in entries:
+            for kernel_index, kernel in enumerate(entry["kernels"]):
+                if entry["remaining"][kernel_index] <= 0:
+                    continue
+                block_resource = self._block_resource(kernel)
+                hardware_fit = any(
+                    block_resource["shared_mem"] <= sm.shared_mem_total and
+                    block_resource["registers"] <= sm.register_total and
+                    block_resource["warps"] <= sm.warp_total
+                    for sm in sms
+                )
+                if not hardware_fit:
+                    return {
+                        "feasible": False,
+                        "failure_reason": "kernel_block_exceeds_sm_capacity",
+                        "initial_utilization": -1.0,
+                    }
+        if not self._timeline_initial_admission(sms, entries, start_time):
+            return {
+                "feasible": False,
+                "failure_reason": "initial_co_residency",
+                "initial_utilization": -1.0,
+            }
+        self._timeline_fill_available(sms, entries, start_time)
+        return {
+            "feasible": True,
+            "failure_reason": None,
+            "initial_utilization": self._timeline_utilization(sms),
+            "initial_resident_blocks": {
+                entry["name"]: sum(
+                    batch["count"]
+                    for sm in sms
+                    for batch in sm.running_batches
+                    if batch["owner"] == entry_index
+                )
+                for entry_index, entry in enumerate(entries)
+            },
+        }
+
+    def simulate_combo_timeline(self, operators, start_time: float):
+        """Simulate a candidate on one shared, non-preemptive block timeline."""
+        sms = [_TimelineSM(sm) for sm in self.sms]
+        entries = self._make_timeline_entries(operators, start_time)
+        if not self._timeline_initial_admission(sms, entries, start_time):
+            return {
+                "feasible": False,
+                "failure_reason": "initial_co_residency",
+            }
+
+        self._timeline_fill_available(sms, entries, start_time)
+        initial_utilization = self._timeline_utilization(sms)
+        initial_resident_blocks = {
+            entry["name"]: sum(
+                batch["count"]
+                for sm in sms
+                for batch in sm.running_batches
+                if batch["owner"] == entry_index
+            )
+            for entry_index, entry in enumerate(entries)
+        }
+        current_time = float(start_time)
+        utilization_area = 0.0
+        overlap_duration = 0.0
+        max_concurrent_operators = len(self._timeline_active_owners(sms))
+        event_count = 0
+        launch_rounds = 1 if any(initial_resident_blocks.values()) else 0
+        peak_utilization = initial_utilization
+        max_events = int(os.environ.get("OPARA_TD_MAX_EVENTS", "100000"))
+
+        while any(
+                entry["kernel_index"] < len(entry["kernels"])
+                for entry in entries):
+            running_batches = [
+                batch for sm in sms for batch in sm.running_batches
+            ]
+            if not running_batches:
+                launched = self._timeline_fill_available(
+                    sms, entries, current_time, rotation=event_count
+                )
+                if launched == 0:
+                    return {
+                        "feasible": False,
+                        "failure_reason": "pending_kernel_cannot_fit",
+                    }
+                launch_rounds += 1
+                running_batches = [
+                    batch for sm in sms for batch in sm.running_batches
+                ]
+
+            next_time = min(batch["end_time"] for batch in running_batches)
+            if next_time < current_time - 1e-12:
+                return {
+                    "feasible": False,
+                    "failure_reason": "non_monotonic_timeline",
+                }
+            delta = max(0.0, next_time - current_time)
+            current_utilization = self._timeline_utilization(sms)
+            active_owners = self._timeline_active_owners(sms)
+            utilization_area += current_utilization * delta
+            if len(active_owners) >= 2:
+                overlap_duration += delta
+            peak_utilization = max(peak_utilization, current_utilization)
+            max_concurrent_operators = max(
+                max_concurrent_operators, len(active_owners)
+            )
+            current_time = next_time
+
+            for sm in sms:
+                for batch in sm.release_at(current_time):
+                    owner = batch["owner"]
+                    if owner is not None:
+                        entries[owner]["inflight"] -= batch["count"]
+                        if entries[owner]["inflight"] < 0:
+                            raise AssertionError("negative timeline inflight blocks")
+
+            self._advance_timeline_entries(entries, current_time)
+            launched = self._timeline_fill_available(
+                sms, entries, current_time, rotation=event_count + 1
+            )
+            if launched > 0:
+                launch_rounds += 1
+            event_count += 1
+            if event_count > max_events:
+                return {
+                    "feasible": False,
+                    "failure_reason": "event_limit",
+                    "event_count": event_count,
+                }
+
+        makespan = max(0.0, current_time - float(start_time))
+        average_utilization = (
+            utilization_area / makespan if makespan > 0 else 0.0
+        )
+        overlap_fraction = (
+            overlap_duration / makespan if makespan > 0 else 0.0
+        )
+        return {
+            "feasible": True,
+            "failure_reason": None,
+            "makespan": makespan,
+            "average_utilization": average_utilization,
+            "initial_utilization": initial_utilization,
+            "peak_utilization": peak_utilization,
+            "overlap_duration": overlap_duration,
+            "overlap_fraction": overlap_fraction,
+            "max_concurrent_operators": max_concurrent_operators,
+            "event_count": event_count,
+            "launch_rounds": launch_rounds,
+            "initial_resident_blocks": initial_resident_blocks,
+            "operator_completion_times": {
+                entry["name"]: (
+                    entry["completion_time"] - float(start_time)
+                    if entry["completion_time"] is not None else None
+                )
+                for entry in entries
+            },
+        }
 
     def can_apply_launch(self, operator: OperatorTask, start_time: float)-> bool:
         if not operator.kernels:
@@ -438,22 +895,124 @@ class Scheduler:
         self.occupancy_weight = float(os.getenv('JANUS_OCCUPANCY_WEIGHT', '0.005'))
         self.time_domain = time_domain
         self._static_profile_cache = {}
+        self._td_single_timeline_cache = {}
+        self.timeline_shortlist_size = int(os.environ.get(
+            "OPARA_TD_TIMELINE_SHORTLIST", "8"
+        ))
+        if self.timeline_shortlist_size < 1:
+            raise ValueError("OPARA_TD_TIMELINE_SHORTLIST must be >= 1")
         self._schedule_call = 0
+
+    @staticmethod
+    def _operator_timeline_signature(operator):
+        return (
+            operator.name,
+            tuple(
+                (
+                    kernel.name,
+                    float(kernel.duration),
+                    int(kernel.shared_mem),
+                    int(kernel.registers),
+                    int(kernel.warps),
+                    int(kernel.blocks_remaining),
+                )
+                for kernel in operator.kernels
+            ),
+        )
+
+    def _resource_timeline_signature(self, current_time):
+        return tuple(
+            (
+                sm.shared_mem_used,
+                sm.registers_used,
+                sm.warps_used,
+                tuple(sorted(
+                    (
+                        round(float(end_time) - float(current_time), 12),
+                        kernel_name,
+                        block_resource["shared_mem"],
+                        block_resource["registers"],
+                        block_resource["warps"],
+                    )
+                    for end_time, kernel_name, block_resource in sm.running_blocks
+                )),
+            )
+            for sm in self.resource_model.sms
+        )
+
+    def _single_timeline_makespan(self, operator, current_time):
+        cache_key = (
+            self._resource_timeline_signature(current_time),
+            self._operator_timeline_signature(operator),
+        )
+        cached = self._td_single_timeline_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        metrics = self.resource_model.simulate_combo_timeline(
+            [operator], current_time
+        )
+        makespan = (
+            float(metrics["makespan"])
+            if metrics.get("feasible") else float("inf")
+        )
+        self._td_single_timeline_cache[cache_key] = makespan
+        return makespan
+
+    def _timeline_candidate_score(self, combo, metrics, current_time):
+        serial_makespan = sum(
+            self._single_timeline_makespan(operator, current_time)
+            for operator in combo
+        )
+        concurrent_makespan = float(metrics["makespan"])
+        if not math.isfinite(serial_makespan):
+            predicted_speedup = 0.0
+        elif serial_makespan <= 0 or concurrent_makespan <= 0:
+            predicted_speedup = 1.0
+        else:
+            predicted_speedup = serial_makespan / concurrent_makespan
+        metrics["serial_makespan"] = serial_makespan
+        metrics["predicted_speedup"] = predicted_speedup
+        metrics["normalized_time_saved"] = (
+            max(0.0, 1.0 - concurrent_makespan / serial_makespan)
+            if serial_makespan > 0 and math.isfinite(serial_makespan)
+            else 0.0
+        )
+        return predicted_speedup
 
     def _record_candidate_stats(
             self, ready_names, ready_used_names, raw_theoretical_count,
             theoretical_count, combo_scores, top_candidates, selected_combo,
-            occ_max, current_time):
+            occ_max, current_time, combo_metrics=None):
         self._schedule_call += 1
+        combo_metrics = combo_metrics or {}
         feasible_count = sum(1 for _, score in combo_scores if score >= 0)
         if self.selection_mode == 'static_interference':
             scoring_candidate_count = feasible_count
         else:
             scoring_candidate_count = len(top_candidates)
-        _CANDIDATE_STATS.append({
+        selected_timeline = combo_metrics.get(id(selected_combo))
+        feasible_timeline_metrics = [
+            combo_metrics[id(combo)]
+            for combo, score in combo_scores
+            if score >= 0 and id(combo) in combo_metrics
+        ]
+        timeline_speedups = [
+            float(metrics["predicted_speedup"])
+            for metrics in feasible_timeline_metrics
+            if "predicted_speedup" in metrics
+        ]
+        record = {
             'call': self._schedule_call,
             'current_time': float(current_time),
             'time_domain': bool(self.time_domain),
+            'candidate_score_kind': 'initial_occupancy',
+            'final_score_kind': (
+                'predicted_speedup' if self.time_domain
+                else 'strategy_score'
+            ),
+            'timeline_shortlist_limit': (
+                self.timeline_shortlist_size if self.time_domain else 0
+            ),
             'selection_mode': self.selection_mode,
             'alpha': float(self.alpha),
             'ready_count': len(ready_names),
@@ -467,11 +1026,23 @@ class Scheduler:
             'alpha_candidate_count': len(top_candidates),
             'scoring_candidate_count': scoring_candidate_count,
             'occ_max': float(occ_max),
+            'candidate_score_max': float(occ_max),
             'selected': [op.name for op in selected_combo],
             'selected_size': len(selected_combo),
-        })
+        }
+        if timeline_speedups:
+            record['timeline_candidate_count'] = len(timeline_speedups)
+            record['timeline_speedup_min'] = min(timeline_speedups)
+            record['timeline_speedup_max'] = max(timeline_speedups)
+            record['timeline_speedup_mean'] = (
+                sum(timeline_speedups) / len(timeline_speedups)
+            )
+        if selected_timeline is not None:
+            record['selected_timeline'] = copy.deepcopy(selected_timeline)
+        _CANDIDATE_STATS.append(record)
 
-    def _select_static_interference(self, ready_ops, combo_scores):
+    def _select_static_interference(
+            self, ready_ops, combo_scores, return_ranked=False):
         """Predict round-time gain from magnitude-aware static pressure."""
         feasible = [(combo, occ) for combo, occ in combo_scores if occ >= 0]
         if not feasible:
@@ -530,7 +1101,12 @@ class Scheduler:
             tail = (variance ** 0.5) / max(mean_duration, 1e-9)
             score = gain - self.tail_weight * tail + self.occupancy_weight * max(0.0, occupancy)
             return (score, -overload, -predicted_round, -len(combo), occupancy)
-        return max(feasible, key=candidate_score)[0]
+        ranked = [
+            combo for combo, _ in sorted(
+                feasible, key=candidate_score, reverse=True
+            )
+        ]
+        return ranked if return_ranked else ranked[0]
 
     def schedule(self, ready_ops: List["OperatorTask"], current_time: float) -> List["OperatorTask"]:
 
@@ -542,7 +1118,8 @@ class Scheduler:
             for r in range(1, raw_max_comb_size + 1)
         )
         # 枚举所有候选组合并计算每个组合的 SM 占用率（occupancy）
-        combo_scores = []  # list of (combo_list, occupancy_score)
+        combo_scores = []  # list of (combo_list, simulator_score)
+        combo_metrics = {}
 
         max_comb_size = min(5, len(ready_ops))
         # 防止组合爆炸：默认最多使用15个ready算子；实验可通过环境变量调整。
@@ -561,11 +1138,15 @@ class Scheduler:
         )
         for r in range(1, max_comb_size + 1):
             for combo in combinations(ready_ops, r):
-                virtual_model = copy.deepcopy(self.resource_model)
+                virtual_model = (
+                    self.resource_model if self.resource_model.time_domain
+                    else copy.deepcopy(self.resource_model)
+                )
                 if virtual_model.time_domain:
-                    feasible = virtual_model.try_apply_concurrent_combo(
+                    initial_metrics = virtual_model.evaluate_initial_combo(
                         combo, current_time
                     )
+                    feasible = bool(initial_metrics.get("feasible"))
                 else:
                     feasible = True
                     for op in combo:
@@ -577,15 +1158,18 @@ class Scheduler:
                             # 如果单个算子本身无法在虚拟模型中分配完其线程块，则视为不可行
                             feasible = False
                             break
-                # 即使不可行，也记录其占用情况（不可行的组合占用为 -inf，后续被丢弃）
-                score = virtual_model.total_utilization() if feasible else -1.0
-                combo_scores.append((list(combo), score))
+                combo_list = list(combo)
+                if feasible and virtual_model.time_domain:
+                    score = float(initial_metrics["initial_utilization"])
+                else:
+                    score = virtual_model.total_utilization() if feasible else -1.0
+                combo_scores.append((combo_list, score))
 
         if not combo_scores:
             self._record_candidate_stats(
                 ready_names, ready_used_names, raw_theoretical_count,
                 theoretical_count, combo_scores, [], [], -1.0,
-                current_time)
+                current_time, combo_metrics)
             return []
 
         # 找到最大占用率
@@ -599,14 +1183,73 @@ class Scheduler:
             self._record_candidate_stats(
                 ready_names, ready_used_names, raw_theoretical_count,
                 theoretical_count, combo_scores, top_candidates,
-                selected_combo, occ_max, current_time)
+                selected_combo, occ_max, current_time, combo_metrics)
             return selected_combo
+
+        def finish_ranked(ranked_candidates):
+            ranked_candidates = list(ranked_candidates)
+            if not ranked_candidates:
+                return finish([])
+            if not self.time_domain:
+                return finish(ranked_candidates[0])
+
+            # Preserve one finalist from every available group size before
+            # filling the remaining slots by the stage-1 strategy rank.
+            finalists = []
+            seen_sizes = set()
+            for combo in ranked_candidates:
+                if len(combo) in seen_sizes:
+                    continue
+                finalists.append(combo)
+                seen_sizes.add(len(combo))
+                if len(finalists) >= self.timeline_shortlist_size:
+                    break
+            if len(finalists) < self.timeline_shortlist_size:
+                finalist_ids = {id(combo) for combo in finalists}
+                for combo in ranked_candidates:
+                    if id(combo) in finalist_ids:
+                        continue
+                    finalists.append(combo)
+                    finalist_ids.add(id(combo))
+                    if len(finalists) >= self.timeline_shortlist_size:
+                        break
+            stage1_ranks = {
+                id(combo): rank
+                for rank, combo in enumerate(ranked_candidates, start=1)
+            }
+            timeline_ranked = []
+            for combo in finalists:
+                stage1_rank = stage1_ranks[id(combo)]
+                metrics = self.resource_model.simulate_combo_timeline(
+                    combo, current_time
+                )
+                metrics["stage1_rank"] = stage1_rank
+                metrics["stage1_shortlist_size"] = len(finalists)
+                combo_metrics[id(combo)] = metrics
+                if not metrics.get("feasible"):
+                    continue
+                timeline_score = self._timeline_candidate_score(
+                    combo, metrics, current_time
+                )
+                timeline_ranked.append((
+                    timeline_score,
+                    float(metrics["average_utilization"]),
+                    -stage1_rank,
+                    combo,
+                ))
+
+            if not timeline_ranked:
+                raise RuntimeError(
+                    "no stage-1 finalist completed the shared TD timeline"
+                )
+            selected_combo = max(timeline_ranked, key=lambda item: item[:3])[3]
+            return finish(selected_combo)
 
         # 如果没有满足阈值的候选，则退回到单纯的最大占用组合
         if not top_candidates:
             # 取占用率最高的组合
             best_combo = max(combo_scores, key=lambda x: x[1])[0]
-            return finish(best_combo)
+            return finish_ranked([best_combo])
 
         # ===== 检查是否有 ncu memory 数据 =====
         _has_ncu = any(
@@ -637,7 +1280,9 @@ class Scheduler:
                 occupancy = next(score for candidate, score in combo_scores if candidate == combo)
                 return abs(compute_count - memory_count), -occupancy
 
-            return finish(min(top_candidates, key=legacy_imbalance_score))
+            return finish_ranked(sorted(
+                top_candidates, key=legacy_imbalance_score
+            ))
 
         if self.selection_mode in ('static_interference', 'static_interference_alpha'):
             scoring_scores = combo_scores
@@ -646,11 +1291,21 @@ class Scheduler:
                 scoring_scores = [
                     item for item in combo_scores if id(item[0]) in top_candidate_ids
                 ]
-            return finish(self._select_static_interference(ready_ops, scoring_scores))
+            ranked = self._select_static_interference(
+                ready_ops, scoring_scores, return_ranked=True
+            )
+            return finish_ranked(ranked)
 
         if self.selection_mode == 'max_occupancy':
-            best_combo = max(top_candidates, key=lambda c: next(s for cc, s in combo_scores if cc is c))
-            return finish(best_combo)
+            ranked = sorted(
+                top_candidates,
+                key=lambda c: next(
+                    score for candidate, score in combo_scores
+                    if candidate is c
+                ),
+                reverse=True,
+            )
+            return finish_ranked(ranked)
 
         elif self.selection_mode == 'memory_aware':
             # Memory-aware 策略：避免两个高 DRAM 算子放一起
@@ -681,8 +1336,10 @@ class Scheduler:
 
                 return occ - penalty
 
-            best_combo = max(top_candidates, key=memory_aware_score)
-            return finish(best_combo)
+            ranked = sorted(
+                top_candidates, key=memory_aware_score, reverse=True
+            )
+            return finish_ranked(ranked)
 
         elif self.selection_mode == 'min_resource':
             # 资源加和策略：选总资源压力最小的组合
@@ -711,8 +1368,9 @@ class Scheduler:
                 occ = next(s for c, s in combo_scores if c is combo)
                 return (score, -occ)
 
-            best_combo = min(top_candidates, key=combo_sort_key_minres)
-            return finish(best_combo)
+            return finish_ranked(sorted(
+                top_candidates, key=combo_sort_key_minres
+            ))
 
         else:  # 'cosine' — 余弦相似度（自动扩展维度）
             def resource_diversity_score(combo):
@@ -766,8 +1424,9 @@ class Scheduler:
                 occ = next(s for c, s in combo_scores if c is combo)
                 return (sim, -occ)
 
-            best_combo = min(top_candidates, key=combo_sort_key)
-            return finish(best_combo)
+            return finish_ranked(sorted(
+                top_candidates, key=combo_sort_key
+            ))
 
 
 

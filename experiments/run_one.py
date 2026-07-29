@@ -122,9 +122,22 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
         "time_domain": spec["simulator"] == "td",
         "internal_alpha": internal_alpha,
         "simulator_semantics": (
-            "initial_block_co_residency_with_block_waves"
+            "shared_candidate_timeline_v1"
             if spec["simulator"] == "td"
             else "all_blocks_co_resident"
+        ),
+        "candidate_score_kind": (
+            "initial_occupancy_then_predicted_speedup"
+            if spec["simulator"] == "td"
+            else "initial_occupancy"
+        ),
+        "td_timeline_shortlist": (
+            int(os.environ.get("OPARA_TD_TIMELINE_SHORTLIST", "8"))
+            if spec["simulator"] == "td" else None
+        ),
+        "td_max_events": (
+            int(os.environ.get("OPARA_TD_MAX_EVENTS", "100000"))
+            if spec["simulator"] == "td" else None
         ),
     }
 
@@ -163,6 +176,10 @@ def main() -> int:
         scheduler_calls = get_candidate_stats(clear=True)
         total_enumerated = sum(item["enumerated_count"] for item in scheduler_calls)
         total_feasible = sum(item["feasible_count"] for item in scheduler_calls)
+        selected_timelines = [
+            item["selected_timeline"] for item in scheduler_calls
+            if "selected_timeline" in item
+        ]
         scheduler_summary = {
             "capture_build_seconds": capture_build_seconds,
             "max_ready": args.max_ready,
@@ -181,6 +198,26 @@ def main() -> int:
             ),
             "single_scoring_candidate_calls": sum(
                 item["scoring_candidate_count"] == 1 for item in scheduler_calls
+            ),
+            "timeline_call_count": len(selected_timelines),
+            "selected_timeline_mean_speedup": (
+                sum(item["predicted_speedup"] for item in selected_timelines)
+                / len(selected_timelines)
+                if selected_timelines else None
+            ),
+            "selected_timeline_mean_average_utilization": (
+                sum(item["average_utilization"] for item in selected_timelines)
+                / len(selected_timelines)
+                if selected_timelines else None
+            ),
+            "selected_timeline_mean_overlap_fraction": (
+                sum(item["overlap_fraction"] for item in selected_timelines)
+                / len(selected_timelines)
+                if selected_timelines else None
+            ),
+            "selected_timeline_max_event_count": max(
+                (item["event_count"] for item in selected_timelines),
+                default=0,
             ),
         }
         with torch.no_grad(): candidate = runner(*inputs)

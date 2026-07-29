@@ -982,9 +982,10 @@ class Scheduler:
     def _record_candidate_stats(
             self, ready_names, ready_used_names, raw_theoretical_count,
             theoretical_count, combo_scores, top_candidates, selected_combo,
-            occ_max, current_time, combo_metrics=None):
+            occ_max, current_time, combo_metrics=None, passthrough_ops=None):
         self._schedule_call += 1
         combo_metrics = combo_metrics or {}
+        passthrough_ops = passthrough_ops or []
         feasible_count = sum(1 for _, score in combo_scores if score >= 0)
         if self.selection_mode == 'static_interference':
             scoring_candidate_count = feasible_count
@@ -1001,6 +1002,9 @@ class Scheduler:
             for metrics in feasible_timeline_metrics
             if "predicted_speedup" in metrics
         ]
+        selected_resource_names = [op.name for op in selected_combo]
+        passthrough_names = [op.name for op in passthrough_ops]
+        combined_ready_used_names = ready_used_names + passthrough_names
         record = {
             'call': self._schedule_call,
             'current_time': float(current_time),
@@ -1016,9 +1020,13 @@ class Scheduler:
             'selection_mode': self.selection_mode,
             'alpha': float(self.alpha),
             'ready_count': len(ready_names),
-            'ready_used_count': len(ready_used_names),
+            'ready_used_count': len(combined_ready_used_names),
             'ready_ops': ready_names,
-            'ready_used_ops': ready_used_names,
+            'ready_used_ops': combined_ready_used_names,
+            'resource_ready_count': len(ready_names) - len(passthrough_names),
+            'resource_ready_used_count': len(ready_used_names),
+            'passthrough_count': len(passthrough_names),
+            'passthrough_ops': passthrough_names,
             'raw_theoretical_count': raw_theoretical_count,
             'theoretical_count': theoretical_count,
             'enumerated_count': len(combo_scores),
@@ -1027,8 +1035,11 @@ class Scheduler:
             'scoring_candidate_count': scoring_candidate_count,
             'occ_max': float(occ_max),
             'candidate_score_max': float(occ_max),
-            'selected': [op.name for op in selected_combo],
-            'selected_size': len(selected_combo),
+            'selected_resource': selected_resource_names,
+            'selected_resource_size': len(selected_combo),
+            'selected_passthrough': passthrough_names,
+            'selected': selected_resource_names + passthrough_names,
+            'selected_size': len(selected_combo) + len(passthrough_ops),
         }
         if timeline_speedups:
             record['timeline_candidate_count'] = len(timeline_speedups)
@@ -1112,6 +1123,22 @@ class Scheduler:
 
         self.resource_model.update_time(current_time)
         ready_names = [op.name for op in ready_ops]
+        passthrough_ops = []
+        if self.time_domain:
+            passthrough_ops = [
+                operator for operator in ready_ops
+                if not any(
+                    kernel.blocks_remaining > 0
+                    for kernel in operator.kernels
+                )
+            ]
+            ready_ops = [
+                operator for operator in ready_ops
+                if any(
+                    kernel.blocks_remaining > 0
+                    for kernel in operator.kernels
+                )
+            ]
         raw_max_comb_size = min(5, len(ready_ops))
         raw_theoretical_count = sum(
             math.comb(len(ready_ops), r)
@@ -1169,8 +1196,8 @@ class Scheduler:
             self._record_candidate_stats(
                 ready_names, ready_used_names, raw_theoretical_count,
                 theoretical_count, combo_scores, [], [], -1.0,
-                current_time, combo_metrics)
-            return []
+                current_time, combo_metrics, passthrough_ops)
+            return list(passthrough_ops)
 
         # 找到最大占用率
         occ_max = max(score for _, score in combo_scores)
@@ -1183,8 +1210,9 @@ class Scheduler:
             self._record_candidate_stats(
                 ready_names, ready_used_names, raw_theoretical_count,
                 theoretical_count, combo_scores, top_candidates,
-                selected_combo, occ_max, current_time, combo_metrics)
-            return selected_combo
+                selected_combo, occ_max, current_time, combo_metrics,
+                passthrough_ops)
+            return selected_combo + passthrough_ops
 
         def finish_ranked(ranked_candidates):
             ranked_candidates = list(ranked_candidates)

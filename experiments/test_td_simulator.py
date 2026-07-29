@@ -148,6 +148,56 @@ class TimeDomainSimulatorTests(unittest.TestCase):
             reverse["average_utilization"],
         )
 
+    def test_zero_resource_nodes_bypass_gpu_candidate_enumeration(self):
+        clear_candidate_stats()
+        model = ResourceModel(1, SM_SPECS, time_domain=True)
+        scheduler = Scheduler(
+            model,
+            alpha=0.9,
+            selection_mode="max_occupancy",
+            time_domain=True,
+        )
+        resource_op = make_operator("resource")
+        metadata_ops = [
+            OperatorTask("metadata_a", []),
+            OperatorTask("metadata_b", []),
+        ]
+
+        selected = scheduler.schedule(
+            [resource_op] + metadata_ops, 0.0
+        )
+        stats = get_candidate_stats(clear=True)[0]
+
+        self.assertEqual({op.name for op in selected}, {
+            "resource", "metadata_a", "metadata_b"
+        })
+        self.assertEqual(stats["enumerated_count"], 1)
+        self.assertEqual(stats["resource_ready_count"], 1)
+        self.assertEqual(stats["passthrough_count"], 2)
+
+    def test_only_zero_resource_nodes_are_returned_without_combinations(self):
+        clear_candidate_stats()
+        model = ResourceModel(1, SM_SPECS, time_domain=True)
+        scheduler = Scheduler(
+            model,
+            alpha=0.9,
+            selection_mode="max_occupancy",
+            time_domain=True,
+        )
+        metadata_ops = [
+            OperatorTask("metadata_a", []),
+            OperatorTask("metadata_b", []),
+        ]
+
+        selected = scheduler.schedule(metadata_ops, 0.0)
+        stats = get_candidate_stats(clear=True)[0]
+
+        self.assertEqual({op.name for op in selected}, {
+            "metadata_a", "metadata_b"
+        })
+        self.assertEqual(stats["enumerated_count"], 0)
+        self.assertEqual(stats["passthrough_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

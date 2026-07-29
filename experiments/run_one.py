@@ -196,6 +196,24 @@ def main() -> int:
             "observed_max_ready_used_count": max(
                 (item["ready_used_count"] for item in scheduler_calls), default=0
             ),
+            "observed_max_resource_ready_count": max(
+                (item.get("resource_ready_count", item["ready_count"])
+                 for item in scheduler_calls),
+                default=0,
+            ),
+            "observed_max_resource_ready_used_count": max(
+                (item.get("resource_ready_used_count", item["ready_used_count"])
+                 for item in scheduler_calls),
+                default=0,
+            ),
+            "passthrough_call_count": sum(
+                item.get("passthrough_count", 0) > 0
+                for item in scheduler_calls
+            ),
+            "passthrough_node_count": sum(
+                item.get("passthrough_count", 0)
+                for item in scheduler_calls
+            ),
             "single_scoring_candidate_calls": sum(
                 item["scoring_candidate_count"] == 1 for item in scheduler_calls
             ),

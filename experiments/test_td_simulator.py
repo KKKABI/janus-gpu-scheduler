@@ -1,6 +1,8 @@
 import importlib.util
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,14 @@ def make_operator(name, *, blocks=1, warps=2, shared_mem=0, registers=0):
         warps=warps,
         blocks=blocks,
     )])
+
+
+def add_ncu_pressure(operator, *, dram=0.0, l2=0.0, compute=0.0):
+    kernel = operator.kernels[0]
+    kernel.dram_thru = dram
+    kernel.l2_thru = l2
+    kernel.comp_thru = compute
+    return operator
 
 
 class TimeDomainSimulatorTests(unittest.TestCase):
@@ -97,6 +107,76 @@ class TimeDomainSimulatorTests(unittest.TestCase):
         self.assertEqual(
             stats[0]["selected_timeline"]["predicted_speedup"], 2.0
         )
+
+    def test_strategy_final_selector_does_not_get_overridden_by_timeline(self):
+        operators = [
+            make_operator("a"),
+            make_operator("b"),
+            make_operator("c"),
+        ]
+        operators[0].kernels[0].duration = 10.0
+        operators[1].kernels[0].duration = 1.0
+        operators[2].kernels[0].duration = 10.0
+
+        with mock.patch.dict(os.environ, {
+                "OPARA_TD_FINAL_SELECTOR": "strategy"}):
+            scheduler = Scheduler(
+                ResourceModel(1, SM_SPECS, time_domain=True),
+                alpha=0.0,
+                selection_mode="max_occupancy",
+                time_domain=True,
+            )
+            selected = scheduler.schedule(operators, 0.0)
+
+        self.assertEqual([operator.name for operator in selected], ["a", "b"])
+
+    def test_timeline_final_selector_can_override_stage1_rank(self):
+        operators = [
+            make_operator("a"),
+            make_operator("b"),
+            make_operator("c"),
+        ]
+        operators[0].kernels[0].duration = 10.0
+        operators[1].kernels[0].duration = 1.0
+        operators[2].kernels[0].duration = 10.0
+
+        with mock.patch.dict(os.environ, {
+                "OPARA_TD_FINAL_SELECTOR": "timeline"}):
+            scheduler = Scheduler(
+                ResourceModel(1, SM_SPECS, time_domain=True),
+                alpha=0.0,
+                selection_mode="max_occupancy",
+                time_domain=True,
+            )
+            selected = scheduler.schedule(operators, 0.0)
+
+        self.assertEqual({operator.name for operator in selected}, {"a", "c"})
+
+    def test_ncu_complementary_pair_has_lower_interference_risk(self):
+        scheduler = Scheduler(
+            ResourceModel(1, SM_SPECS, time_domain=True),
+            alpha=0.0,
+            selection_mode="max_occupancy",
+            time_domain=True,
+        )
+        compute_a = add_ncu_pressure(
+            make_operator("compute_a"), compute=90.0
+        )
+        compute_b = add_ncu_pressure(
+            make_operator("compute_b"), compute=90.0
+        )
+        memory = add_ncu_pressure(
+            make_operator("memory"), dram=90.0
+        )
+
+        same_risk = scheduler._combo_interference_metrics(
+            [compute_a, compute_b]
+        )["risk"]
+        complementary_risk = scheduler._combo_interference_metrics(
+            [compute_a, memory]
+        )["risk"]
+
+        self.assertGreater(same_risk, complementary_risk)
 
     def test_shared_timeline_runs_large_grid_in_waves(self):
         model = ResourceModel(1, SM_SPECS, time_domain=True)

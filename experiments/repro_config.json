@@ -141,6 +141,32 @@
       "role": "candidate_pool_ablation"
     },
     {
+      "label": "TD+Janus-final-no-alpha",
+      "simulator": "td",
+      "score": "legacy_balance",
+      "alpha": null,
+      "internal_alpha": 0.0,
+      "final_selector": "strategy",
+      "role": "final_selector_ablation"
+    },
+    {
+      "label": "TD+DRT-final",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "strategy",
+      "role": "final_selector_ablation"
+    },
+    {
+      "label": "TD+GuardedDRT",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "guarded_interference",
+      "timeline_speedup_guard": 0.9,
+      "role": "proposed"
+    },
+    {
       "label": "Static+MinRes",
       "simulator": "static",
       "score": "min_resource",

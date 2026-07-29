@@ -901,6 +901,21 @@ class Scheduler:
         ))
         if self.timeline_shortlist_size < 1:
             raise ValueError("OPARA_TD_TIMELINE_SHORTLIST must be >= 1")
+        self.final_selector = os.environ.get(
+            "OPARA_TD_FINAL_SELECTOR", "timeline"
+        )
+        if self.final_selector not in {
+                "strategy", "timeline", "guarded_interference"}:
+            raise ValueError(
+                "OPARA_TD_FINAL_SELECTOR must be one of "
+                "strategy, timeline, guarded_interference"
+            )
+        self.timeline_speedup_guard = float(os.environ.get(
+            "OPARA_TD_SPEEDUP_GUARD", "0.9"
+        ))
+        if not 0.0 <= self.timeline_speedup_guard <= 1.0:
+            raise ValueError("OPARA_TD_SPEEDUP_GUARD must be in [0, 1]")
+        self._interference_profile_cache = {}
         self._schedule_call = 0
 
     @staticmethod
@@ -979,6 +994,148 @@ class Scheduler:
         )
         return predicted_speedup
 
+    def _operator_interference_profile(self, operator):
+        """Build a magnitude-aware HP resource-pressure profile."""
+        signature = self._operator_timeline_signature(operator)
+        cached = self._interference_profile_cache.get(signature)
+        if cached is not None:
+            return cached
+
+        kernels = [kernel for kernel in operator.kernels if kernel.blocks > 0]
+        if not kernels:
+            profile = {
+                "duration": 0.0,
+                "vector": [0.0] * 6,
+                "ncu_coverage": 0.0,
+            }
+            self._interference_profile_cache[signature] = profile
+            return profile
+
+        n_sms = max(1, len(self.resource_model.sms))
+        sample_sm = self.resource_model.sms[0]
+        reg_cap = float(max(1, sample_sm.register_total))
+        smem_cap = float(max(1, sample_sm.shared_mem_total))
+        warp_cap = float(max(1, sample_sm.warp_total))
+        duration = sum(max(float(kernel.duration), 1e-9) for kernel in kernels)
+        vector = [0.0] * 6
+        ncu_weight = 0.0
+
+        for kernel in kernels:
+            kernel_duration = max(float(kernel.duration), 1e-9)
+            weight = kernel_duration / duration
+            fit_reg = (
+                int(reg_cap // kernel.registers)
+                if kernel.registers > 0 else 32
+            )
+            fit_smem = (
+                int(smem_cap // kernel.shared_mem)
+                if kernel.shared_mem > 0 else 32
+            )
+            fit_warp = (
+                int(warp_cap // kernel.warps)
+                if kernel.warps > 0 else 32
+            )
+            blocks_per_sm = max(1, min(
+                32, fit_reg, fit_smem, fit_warp
+            ))
+            coverage = min(
+                1.0, float(kernel.blocks) / (n_sms * blocks_per_sm)
+            )
+            vector[0] += weight * min(
+                1.0, blocks_per_sm * kernel.registers / reg_cap
+            ) * coverage
+            vector[1] += weight * min(
+                1.0, blocks_per_sm * kernel.shared_mem / smem_cap
+            ) * coverage
+            vector[2] += weight * min(
+                1.0, blocks_per_sm * kernel.warps / warp_cap
+            ) * coverage
+
+            ncu_values = [
+                max(0.0, float(getattr(kernel, "dram_thru", 0.0))) / 100.0,
+                max(0.0, float(getattr(kernel, "l2_thru", 0.0))) / 100.0,
+                max(0.0, float(getattr(kernel, "comp_thru", 0.0))) / 100.0,
+            ]
+            if any(value > 0.0 for value in ncu_values):
+                ncu_weight += weight
+            for index, value in enumerate(ncu_values, start=3):
+                vector[index] += weight * min(1.0, value)
+
+        profile = {
+            "duration": duration,
+            "vector": vector,
+            "ncu_coverage": min(1.0, ncu_weight),
+        }
+        self._interference_profile_cache[signature] = profile
+        return profile
+
+    def _combo_interference_metrics(self, combo):
+        """Estimate HP-HP conflict without treating low pressure as high risk."""
+        profiles = [
+            self._operator_interference_profile(operator)
+            for operator in combo
+        ]
+        if len(profiles) <= 1:
+            return {
+                "risk": 0.0,
+                "pair_conflict": 0.0,
+                "capacity_overload": 0.0,
+                "duration_tail": 0.0,
+                "ncu_coverage": (
+                    profiles[0]["ncu_coverage"] if profiles else 0.0
+                ),
+                "pair_count": 0,
+            }
+
+        pair_conflicts = []
+        for left_index in range(len(profiles)):
+            left = profiles[left_index]
+            for right_index in range(left_index + 1, len(profiles)):
+                right = profiles[right_index]
+                products = [
+                    left_value * right_value
+                    for left_value, right_value in zip(
+                        left["vector"], right["vector"]
+                    )
+                ]
+                shared_pressure = (
+                    0.5 * max(products)
+                    + 0.5 * sum(products) / len(products)
+                )
+                longer = max(left["duration"], right["duration"], 1e-9)
+                temporal_overlap = min(
+                    left["duration"], right["duration"]
+                ) / longer
+                pair_conflicts.append(shared_pressure * temporal_overlap)
+
+        pair_conflict = sum(pair_conflicts) / len(pair_conflicts)
+        static_sums = [
+            sum(profile["vector"][dimension] for profile in profiles)
+            for dimension in range(3)
+        ]
+        raw_overload = max(0.0, max(static_sums) - 1.0)
+        capacity_overload = raw_overload / (1.0 + raw_overload)
+        risk = min(1.0, 0.7 * pair_conflict + 0.3 * capacity_overload)
+
+        durations = [profile["duration"] for profile in profiles]
+        mean_duration = sum(durations) / len(durations)
+        variance = sum(
+            (duration - mean_duration) ** 2 for duration in durations
+        ) / len(durations)
+        duration_tail = (
+            variance ** 0.5 / max(mean_duration, 1e-9)
+        )
+        return {
+            "risk": risk,
+            "pair_conflict": pair_conflict,
+            "capacity_overload": capacity_overload,
+            "duration_tail": duration_tail,
+            "ncu_coverage": sum(
+                profile["ncu_coverage"] for profile in profiles
+            ) / len(profiles),
+            "pair_count": len(pair_conflicts),
+        }
+
     def _record_candidate_stats(
             self, ready_names, ready_used_names, raw_theoretical_count,
             theoretical_count, combo_scores, top_candidates, selected_combo,
@@ -1011,8 +1168,18 @@ class Scheduler:
             'time_domain': bool(self.time_domain),
             'candidate_score_kind': 'initial_occupancy',
             'final_score_kind': (
-                'predicted_speedup' if self.time_domain
+                {
+                    'strategy': 'strategy_score',
+                    'timeline': 'predicted_speedup',
+                    'guarded_interference': 'interference_guarded_speedup',
+                }[self.final_selector] if self.time_domain
                 else 'strategy_score'
+            ),
+            'final_selector': (
+                self.final_selector if self.time_domain else 'strategy'
+            ),
+            'timeline_speedup_guard': (
+                self.timeline_speedup_guard if self.time_domain else None
             ),
             'timeline_shortlist_limit': (
                 self.timeline_shortlist_size if self.time_domain else 0
@@ -1048,6 +1215,17 @@ class Scheduler:
             record['timeline_speedup_mean'] = (
                 sum(timeline_speedups) / len(timeline_speedups)
             )
+        interference_metrics = [
+            metrics["interference"]
+            for metrics in feasible_timeline_metrics
+            if "interference" in metrics
+        ]
+        if interference_metrics:
+            risks = [float(metrics["risk"]) for metrics in interference_metrics]
+            record['interference_candidate_count'] = len(risks)
+            record['interference_risk_min'] = min(risks)
+            record['interference_risk_max'] = max(risks)
+            record['interference_risk_mean'] = sum(risks) / len(risks)
         if selected_timeline is not None:
             record['selected_timeline'] = copy.deepcopy(selected_timeline)
         _CANDIDATE_STATS.append(record)
@@ -1221,26 +1399,29 @@ class Scheduler:
             if not self.time_domain:
                 return finish(ranked_candidates[0])
 
-            # Preserve one finalist from every available group size before
-            # filling the remaining slots by the stage-1 strategy rank.
-            finalists = []
-            seen_sizes = set()
-            for combo in ranked_candidates:
-                if len(combo) in seen_sizes:
-                    continue
-                finalists.append(combo)
-                seen_sizes.add(len(combo))
-                if len(finalists) >= self.timeline_shortlist_size:
-                    break
-            if len(finalists) < self.timeline_shortlist_size:
-                finalist_ids = {id(combo) for combo in finalists}
+            if self.final_selector == "strategy":
+                finalists = [ranked_candidates[0]]
+            else:
+                # Preserve one finalist from every available group size before
+                # filling the remaining slots by the stage-1 strategy rank.
+                finalists = []
+                seen_sizes = set()
                 for combo in ranked_candidates:
-                    if id(combo) in finalist_ids:
+                    if len(combo) in seen_sizes:
                         continue
                     finalists.append(combo)
-                    finalist_ids.add(id(combo))
+                    seen_sizes.add(len(combo))
                     if len(finalists) >= self.timeline_shortlist_size:
                         break
+                if len(finalists) < self.timeline_shortlist_size:
+                    finalist_ids = {id(combo) for combo in finalists}
+                    for combo in ranked_candidates:
+                        if id(combo) in finalist_ids:
+                            continue
+                        finalists.append(combo)
+                        finalist_ids.add(id(combo))
+                        if len(finalists) >= self.timeline_shortlist_size:
+                            break
             stage1_ranks = {
                 id(combo): rank
                 for rank, combo in enumerate(ranked_candidates, start=1)
@@ -1253,6 +1434,9 @@ class Scheduler:
                 )
                 metrics["stage1_rank"] = stage1_rank
                 metrics["stage1_shortlist_size"] = len(finalists)
+                metrics["interference"] = self._combo_interference_metrics(
+                    combo
+                )
                 combo_metrics[id(combo)] = metrics
                 if not metrics.get("feasible"):
                     continue
@@ -1270,7 +1454,38 @@ class Scheduler:
                 raise RuntimeError(
                     "no stage-1 finalist completed the shared TD timeline"
                 )
-            selected_combo = max(timeline_ranked, key=lambda item: item[:3])[3]
+            if self.final_selector == "strategy":
+                selected_combo = timeline_ranked[0][3]
+            elif self.final_selector == "timeline":
+                selected_combo = max(
+                    timeline_ranked, key=lambda item: item[:3]
+                )[3]
+            else:
+                best_speedup = max(item[0] for item in timeline_ranked)
+                speedup_floor = 1.0 + self.timeline_speedup_guard * max(
+                    0.0, best_speedup - 1.0
+                )
+                guarded = [
+                    item for item in timeline_ranked
+                    if item[0] + 1e-12 >= speedup_floor
+                ]
+                if not guarded:
+                    guarded = [max(
+                        timeline_ranked, key=lambda item: item[:3]
+                    )]
+                for _, _, _, combo in timeline_ranked:
+                    combo_metrics[id(combo)][
+                        "selector_speedup_floor"
+                    ] = speedup_floor
+                selected_combo = min(
+                    guarded,
+                    key=lambda item: (
+                        combo_metrics[id(item[3])]["interference"]["risk"],
+                        -item[0],
+                        -item[1],
+                        combo_metrics[id(item[3])]["stage1_rank"],
+                    ),
+                )[3]
             return finish(selected_combo)
 
         # 如果没有满足阈值的候选，则退回到单纯的最大占用组合

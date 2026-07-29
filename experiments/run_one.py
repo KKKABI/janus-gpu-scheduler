@@ -121,6 +121,11 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
         "selection_mode": selection,
         "time_domain": spec["simulator"] == "td",
         "internal_alpha": internal_alpha,
+        "final_selector": spec.get("final_selector", "timeline"),
+        "timeline_speedup_guard": (
+            float(spec.get("timeline_speedup_guard", 0.9))
+            if spec["simulator"] == "td" else None
+        ),
         "simulator_semantics": (
             "shared_candidate_timeline_v1"
             if spec["simulator"] == "td"
@@ -168,6 +173,11 @@ def main() -> int:
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
         params["max_ready"] = args.max_ready
+        os.environ["OPARA_TD_FINAL_SELECTOR"] = params["final_selector"]
+        if params["timeline_speedup_guard"] is not None:
+            os.environ["OPARA_TD_SPEEDUP_GUARD"] = str(
+                params["timeline_speedup_guard"]
+            )
         capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
         capture_started = time.perf_counter()
         runner = GraphCapturer.capturer(inputs, model, copy_outputs=False, alpha=params["internal_alpha"], selection_mode=params["selection_mode"], time_domain=params["time_domain"], capture_backend=capture_backend)
@@ -179,6 +189,10 @@ def main() -> int:
         selected_timelines = [
             item["selected_timeline"] for item in scheduler_calls
             if "selected_timeline" in item
+        ]
+        selected_interference = [
+            item["interference"] for item in selected_timelines
+            if "interference" in item
         ]
         scheduler_summary = {
             "capture_build_seconds": capture_build_seconds,
@@ -236,6 +250,25 @@ def main() -> int:
             "selected_timeline_max_event_count": max(
                 (item["event_count"] for item in selected_timelines),
                 default=0,
+            ),
+            "selected_interference_mean_risk": (
+                sum(item["risk"] for item in selected_interference)
+                / len(selected_interference)
+                if selected_interference else None
+            ),
+            "selected_interference_max_risk": max(
+                (item["risk"] for item in selected_interference),
+                default=None,
+            ),
+            "selected_interference_mean_pair_conflict": (
+                sum(item["pair_conflict"] for item in selected_interference)
+                / len(selected_interference)
+                if selected_interference else None
+            ),
+            "selected_interference_mean_ncu_coverage": (
+                sum(item["ncu_coverage"] for item in selected_interference)
+                / len(selected_interference)
+                if selected_interference else None
             ),
         }
         with torch.no_grad(): candidate = runner(*inputs)

@@ -101,6 +101,14 @@
       "role": "primary_ablation"
     },
     {
+      "label": "TD+Janus-no-alpha",
+      "simulator": "td",
+      "score": "legacy_balance",
+      "alpha": null,
+      "internal_alpha": 0.0,
+      "role": "candidate_pool_ablation"
+    },
+    {
       "label": "Static+Cos",
       "simulator": "static",
       "score": "cosine",
@@ -123,6 +131,14 @@
       "simulator": "td",
       "score": "drt_no_alpha",
       "alpha": null
+    },
+    {
+      "label": "TD+DRT-alpha0.9",
+      "simulator": "td",
+      "score": "drt_alpha",
+      "alpha": null,
+      "internal_alpha": 0.9,
+      "role": "candidate_pool_ablation"
     },
     {
       "label": "Static+MinRes",

@@ -330,7 +330,7 @@ class Scheduler:
     def __init__(self, resource_model, alpha=0.9, selection_mode='cosine', time_domain=True):
         self.resource_model = resource_model
         self.alpha = alpha
-        self.selection_mode = selection_mode  # cosine | min_resource | max_occupancy | static_interference | legacy_balance
+        self.selection_mode = selection_mode  # cosine | min_resource | max_occupancy | static_interference[_alpha] | legacy_balance
         self.overload_weight = float(os.getenv('JANUS_OVERLOAD_WEIGHT', '1.0'))
         self.tail_weight = float(os.getenv('JANUS_TAIL_WEIGHT', '0.02'))
         self.occupancy_weight = float(os.getenv('JANUS_OCCUPANCY_WEIGHT', '0.005'))
@@ -532,8 +532,14 @@ class Scheduler:
 
             return finish(min(top_candidates, key=legacy_imbalance_score))
 
-        if self.selection_mode == 'static_interference':
-            return finish(self._select_static_interference(ready_ops, combo_scores))
+        if self.selection_mode in ('static_interference', 'static_interference_alpha'):
+            scoring_scores = combo_scores
+            if self.selection_mode == 'static_interference_alpha':
+                top_candidate_ids = {id(combo) for combo in top_candidates}
+                scoring_scores = [
+                    item for item in combo_scores if id(item[0]) in top_candidate_ids
+                ]
+            return finish(self._select_static_interference(ready_ops, scoring_scores))
 
         if self.selection_mode == 'max_occupancy':
             best_combo = max(top_candidates, key=lambda c: next(s for cc, s in combo_scores if cc is c))

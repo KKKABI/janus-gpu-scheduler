@@ -109,6 +109,7 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
         "cosine": "cosine",
         "min_resource": "min_resource",
         "drt_no_alpha": "static_interference",
+        "drt_alpha": "static_interference_alpha",
     }[spec["score"]]
     if "internal_alpha" in spec:
         internal_alpha = float(spec["internal_alpha"])

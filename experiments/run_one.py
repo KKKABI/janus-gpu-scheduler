@@ -121,6 +121,11 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
         "selection_mode": selection,
         "time_domain": spec["simulator"] == "td",
         "internal_alpha": internal_alpha,
+        "simulator_semantics": (
+            "initial_block_co_residency_with_block_waves"
+            if spec["simulator"] == "td"
+            else "all_blocks_co_resident"
+        ),
     }
 
 

@@ -124,7 +124,138 @@ class ResourceModel:
             sm.release_finished_blocks(current_time)
         self.current_time = current_time
 
+    @staticmethod
+    def _block_resource(kernel: KernelProfile) -> dict:
+        return {
+            'shared_mem': kernel.shared_mem,
+            'registers': kernel.registers,
+            'warps': kernel.warps
+        }
+
+    @staticmethod
+    def _allocate_one_block_on_best_sm(sms, kernel: KernelProfile, start_time: float) -> bool:
+        """Allocate one block now without advancing simulated time."""
+        block_resource = ResourceModel._block_resource(kernel)
+        sm_capacities = []
+        for sm_index, sm in enumerate(sms):
+            max_blocks = sm.max_blocks_fit(block_resource)
+            if max_blocks > 0:
+                sm_capacities.append((max_blocks, -sm_index, sm))
+        if not sm_capacities:
+            return False
+        _, _, selected_sm = max(
+            sm_capacities, key=lambda item: (item[0], item[1])
+        )
+        selected_sm.allocate_block(
+            kernel.name, block_resource, start_time, kernel.duration
+        )
+        return True
+
+    @staticmethod
+    def _kernel_admission_pressure(kernel: KernelProfile, sample_sm: VirtualSM):
+        """Order hard-to-place blocks first during exact initial admission."""
+        ratios = (
+            float(kernel.shared_mem) / max(float(sample_sm.shared_mem_total), 1.0),
+            float(kernel.registers) / max(float(sample_sm.register_total), 1.0),
+            float(kernel.warps) / max(float(sample_sm.warp_total), 1.0),
+        )
+        return max(ratios), sum(ratios)
+
+    @staticmethod
+    def _undo_last_block(sm: VirtualSM):
+        _, _, block_resource = sm.running_blocks.pop()
+        sm.shared_mem_used -= block_resource["shared_mem"]
+        sm.registers_used -= block_resource["registers"]
+        sm.warps_used -= block_resource["warps"]
+
+    def _admit_one_block_per_kernel(self, sms, kernels, start_time: float) -> bool:
+        """Find an exact concurrent placement for one block from every kernel.
+
+        Candidate groups contain at most five operators, so a small backtracking
+        search is cheap and avoids feasibility depending on operator order.
+        Equivalent SM states are explored only once at each search depth.
+        """
+        if not kernels:
+            return True
+        sample_sm = sms[0]
+        ordered = sorted(
+            kernels,
+            key=lambda kernel: self._kernel_admission_pressure(kernel, sample_sm),
+            reverse=True,
+        )
+
+        def place(kernel_index: int) -> bool:
+            if kernel_index == len(ordered):
+                return True
+            kernel = ordered[kernel_index]
+            block_resource = self._block_resource(kernel)
+            seen_sm_states = set()
+            for sm in sms:
+                state = (
+                    sm.shared_mem_used,
+                    sm.registers_used,
+                    sm.warps_used,
+                )
+                if state in seen_sm_states:
+                    continue
+                seen_sm_states.add(state)
+                if not sm.can_accept(block_resource):
+                    continue
+                sm.allocate_block(
+                    kernel.name, block_resource, start_time, kernel.duration
+                )
+                if place(kernel_index + 1):
+                    return True
+                self._undo_last_block(sm)
+            return False
+
+        return place(0)
+
+    def try_apply_concurrent_combo(self, operators, start_time: float) -> bool:
+        """Atomically apply the TD initial-co-residency rule to a candidate.
+
+        Every resource-using operator must have at least one block resident at
+        ``start_time``. Once admission succeeds, the remaining current capacity
+        is filled round-robin for occupancy scoring. Blocks that do not fit now
+        may execute in later waves; this method never advances time.
+        """
+        virtual_sms = copy.deepcopy(self.sms)
+        entries = []
+        for operator in operators:
+            if not operator.kernels:
+                continue
+            kernel = copy.deepcopy(operator.kernels[0])
+            pending_blocks = max(0, int(kernel.blocks_remaining))
+            if pending_blocks == 0:
+                continue
+            entries.append({
+                "kernel": kernel,
+                "remaining": pending_blocks - 1,
+            })
+
+        if not self._admit_one_block_per_kernel(
+                virtual_sms,
+                [entry["kernel"] for entry in entries],
+                start_time):
+            return False
+
+        made_progress = True
+        while made_progress:
+            made_progress = False
+            for entry in entries:
+                if entry["remaining"] <= 0:
+                    continue
+                if self._allocate_one_block_on_best_sm(
+                        virtual_sms, entry["kernel"], start_time):
+                    entry["remaining"] -= 1
+                    made_progress = True
+
+        self.sms = virtual_sms
+        return True
+
     def can_apply_launch(self, operator: OperatorTask, start_time: float)-> bool:
+        if not operator.kernels:
+            return True
         virtual_sms = copy.deepcopy(self.sms)
         virtual_operator = copy.deepcopy(operator)
         kernel = virtual_operator.kernels[0]
@@ -149,42 +280,13 @@ class ResourceModel:
                 kernel.allocate_block()
             return not kernel.has_pending_blocks()
 
-        # 时域仿真：推进时间释放已完成 block 再重试
-        current_time = start_time
-        MAX_ITER = 2000
-        for _ in range(MAX_ITER):
-            while kernel.has_pending_blocks():
-                block_resource = {
-                    'shared_mem': kernel.shared_mem,
-                    'registers': kernel.registers,
-                    'warps': kernel.warps
-                }
-                sm_capacities = []
-                for sm in virtual_sms:
-                    max_blocks = sm.max_blocks_fit(block_resource)
-                    if max_blocks > 0:
-                        sm_capacities.append((max_blocks, sm))
-                if not sm_capacities:
-                    break
-                _, selected_sm = max(sm_capacities, key=lambda x: x[0])
-                selected_sm.allocate_block(kernel.name, block_resource, current_time, kernel.duration)
-                kernel.allocate_block()
-
-            if not kernel.has_pending_blocks():
-                return True
-
-            min_end_time = None
-            for sm in virtual_sms:
-                for end_time, _, _ in sm.running_blocks:
-                    if min_end_time is None or end_time < min_end_time:
-                        min_end_time = end_time
-            if min_end_time is None or min_end_time <= current_time:
-                return False
-            current_time = min_end_time
-            for sm in virtual_sms:
-                sm.release_finished_blocks(current_time)
-
-        return False
+        # TD single-operator admission: one block must fit now. Remaining
+        # blocks are allowed to execute in later waves.
+        if not kernel.has_pending_blocks():
+            return True
+        return self._allocate_one_block_on_best_sm(
+            virtual_sms, kernel, start_time
+        )
             
     def apply_launch(self, operator: OperatorTask, start_time: float):
         kernel = operator.kernels[0]
@@ -460,16 +562,21 @@ class Scheduler:
         for r in range(1, max_comb_size + 1):
             for combo in combinations(ready_ops, r):
                 virtual_model = copy.deepcopy(self.resource_model)
-                feasible = True
-                for op in combo:
-                    if not op.kernels:
-                        continue
-                    if virtual_model.can_apply_launch(op, current_time):
-                        virtual_model.apply_launch(op, current_time)
-                    else:
-                        # 如果单个算子本身无法在虚拟模型中分配完其线程块，则视为不可行
-                        feasible = False
-                        break
+                if virtual_model.time_domain:
+                    feasible = virtual_model.try_apply_concurrent_combo(
+                        combo, current_time
+                    )
+                else:
+                    feasible = True
+                    for op in combo:
+                        if not op.kernels:
+                            continue
+                        if virtual_model.can_apply_launch(op, current_time):
+                            virtual_model.apply_launch(op, current_time)
+                        else:
+                            # 如果单个算子本身无法在虚拟模型中分配完其线程块，则视为不可行
+                            feasible = False
+                            break
                 # 即使不可行，也记录其占用情况（不可行的组合占用为 -inf，后续被丢弃）
                 score = virtual_model.total_utilization() if feasible else -1.0
                 combo_scores.append((list(combo), score))

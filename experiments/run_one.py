@@ -140,6 +140,10 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
             int(os.environ.get("OPARA_TD_TIMELINE_SHORTLIST", "8"))
             if spec["simulator"] == "td" else None
         ),
+        "td_interference_shortlist": (
+            int(os.environ.get("OPARA_TD_INTERFERENCE_SHORTLIST", "12"))
+            if spec["simulator"] == "td" else None
+        ),
         "td_max_events": (
             int(os.environ.get("OPARA_TD_MAX_EVENTS", "100000"))
             if spec["simulator"] == "td" else None

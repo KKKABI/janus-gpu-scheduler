@@ -901,6 +901,14 @@ class Scheduler:
         ))
         if self.timeline_shortlist_size < 1:
             raise ValueError("OPARA_TD_TIMELINE_SHORTLIST must be >= 1")
+        self.interference_shortlist_size = int(os.environ.get(
+            "OPARA_TD_INTERFERENCE_SHORTLIST", "12"
+        ))
+        if self.interference_shortlist_size < self.timeline_shortlist_size:
+            raise ValueError(
+                "OPARA_TD_INTERFERENCE_SHORTLIST must be >= "
+                "OPARA_TD_TIMELINE_SHORTLIST"
+            )
         self.final_selector = os.environ.get(
             "OPARA_TD_FINAL_SELECTOR", "timeline"
         )
@@ -1182,7 +1190,11 @@ class Scheduler:
                 self.timeline_speedup_guard if self.time_domain else None
             ),
             'timeline_shortlist_limit': (
-                self.timeline_shortlist_size if self.time_domain else 0
+                (
+                    self.interference_shortlist_size
+                    if self.final_selector == 'guarded_interference'
+                    else self.timeline_shortlist_size
+                ) if self.time_domain else 0
             ),
             'selection_mode': self.selection_mode,
             'alpha': float(self.alpha),
@@ -1399,9 +1411,18 @@ class Scheduler:
             if not self.time_domain:
                 return finish(ranked_candidates[0])
 
+            stage1_ranks = {
+                id(combo): rank
+                for rank, combo in enumerate(ranked_candidates, start=1)
+            }
             if self.final_selector == "strategy":
                 finalists = [ranked_candidates[0]]
             else:
+                shortlist_limit = (
+                    self.interference_shortlist_size
+                    if self.final_selector == "guarded_interference"
+                    else self.timeline_shortlist_size
+                )
                 # Preserve one finalist from every available group size before
                 # filling the remaining slots by the stage-1 strategy rank.
                 finalists = []
@@ -1411,21 +1432,41 @@ class Scheduler:
                         continue
                     finalists.append(combo)
                     seen_sizes.add(len(combo))
-                    if len(finalists) >= self.timeline_shortlist_size:
+                    if len(finalists) >= shortlist_limit:
                         break
-                if len(finalists) < self.timeline_shortlist_size:
+                if (
+                    self.final_selector == "guarded_interference"
+                    and len(finalists) < shortlist_limit
+                ):
+                    finalist_ids = {id(combo) for combo in finalists}
+                    sizes = sorted({len(combo) for combo in ranked_candidates})
+                    for size in sizes:
+                        same_size = [
+                            combo for combo in ranked_candidates
+                            if len(combo) == size
+                        ]
+                        risk_best = min(
+                            same_size,
+                            key=lambda combo: (
+                                self._combo_interference_metrics(combo)["risk"],
+                                stage1_ranks.get(id(combo), float("inf")),
+                            ),
+                        )
+                        if id(risk_best) in finalist_ids:
+                            continue
+                        finalists.append(risk_best)
+                        finalist_ids.add(id(risk_best))
+                        if len(finalists) >= shortlist_limit:
+                            break
+                if len(finalists) < shortlist_limit:
                     finalist_ids = {id(combo) for combo in finalists}
                     for combo in ranked_candidates:
                         if id(combo) in finalist_ids:
                             continue
                         finalists.append(combo)
                         finalist_ids.add(id(combo))
-                        if len(finalists) >= self.timeline_shortlist_size:
+                        if len(finalists) >= shortlist_limit:
                             break
-            stage1_ranks = {
-                id(combo): rank
-                for rank, combo in enumerate(ranked_candidates, start=1)
-            }
             timeline_ranked = []
             for combo in finalists:
                 stage1_rank = stage1_ranks[id(combo)]

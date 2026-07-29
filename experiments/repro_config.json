@@ -163,7 +163,7 @@
       "score": "drt_no_alpha",
       "alpha": null,
       "final_selector": "guarded_interference",
-      "timeline_speedup_guard": 0.9,
+      "timeline_speedup_guard": 0.5,
       "role": "proposed"
     },
     {

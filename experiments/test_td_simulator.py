@@ -178,6 +178,44 @@ class TimeDomainSimulatorTests(unittest.TestCase):
 
         self.assertGreater(same_risk, complementary_risk)
 
+    def test_guarded_selector_prefers_complementary_equal_speedup_pair(self):
+        clear_candidate_stats()
+        operators = [
+            add_ncu_pressure(
+                make_operator("compute_a"), compute=90.0
+            ),
+            add_ncu_pressure(
+                make_operator("compute_b"), compute=90.0
+            ),
+            add_ncu_pressure(
+                make_operator("memory"), dram=90.0
+            ),
+        ]
+        with mock.patch.dict(os.environ, {
+                "OPARA_TD_FINAL_SELECTOR": "guarded_interference",
+                "OPARA_TD_SPEEDUP_GUARD": "0.5"}):
+            scheduler = Scheduler(
+                ResourceModel(1, SM_SPECS, time_domain=True),
+                alpha=0.0,
+                selection_mode="max_occupancy",
+                time_domain=True,
+            )
+            selected = scheduler.schedule(operators, 0.0)
+
+        stats = get_candidate_stats(clear=True)[0]
+        self.assertEqual(
+            {operator.name for operator in selected},
+            {"compute_a", "memory"},
+        )
+        self.assertEqual(
+            stats["selected_timeline"]["final_selector"],
+            "guarded_interference",
+        )
+        self.assertEqual(
+            stats["selected_timeline"]["selector_selected_speedup_loss"],
+            0.0,
+        )
+
     def test_shared_timeline_runs_large_grid_in_waves(self):
         model = ResourceModel(1, SM_SPECS, time_domain=True)
         large = make_operator("large", blocks=5, warps=2)

@@ -126,6 +126,10 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
             float(spec.get("timeline_speedup_guard", 0.9))
             if spec["simulator"] == "td" else None
         ),
+        "interference_risk_trigger": (
+            float(spec.get("interference_risk_trigger", 0.1))
+            if spec["simulator"] == "td" else None
+        ),
         "simulator_semantics": (
             "shared_candidate_timeline_v1"
             if spec["simulator"] == "td"
@@ -181,6 +185,10 @@ def main() -> int:
         if params["timeline_speedup_guard"] is not None:
             os.environ["OPARA_TD_SPEEDUP_GUARD"] = str(
                 params["timeline_speedup_guard"]
+            )
+        if params["interference_risk_trigger"] is not None:
+            os.environ["OPARA_TD_RISK_TRIGGER"] = str(
+                params["interference_risk_trigger"]
             )
         capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
         capture_started = time.perf_counter()

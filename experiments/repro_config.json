@@ -164,6 +164,7 @@
       "alpha": null,
       "final_selector": "guarded_interference",
       "timeline_speedup_guard": 0.5,
+      "interference_risk_trigger": 0.1,
       "role": "proposed"
     },
     {

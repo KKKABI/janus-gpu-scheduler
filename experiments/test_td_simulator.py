@@ -216,6 +216,35 @@ class TimeDomainSimulatorTests(unittest.TestCase):
             0.0,
         )
 
+    def test_guarded_selector_preserves_timeline_choice_below_trigger(self):
+        operators = [
+            add_ncu_pressure(
+                make_operator("compute_a"), compute=90.0
+            ),
+            add_ncu_pressure(
+                make_operator("compute_b"), compute=90.0
+            ),
+            add_ncu_pressure(
+                make_operator("memory"), dram=90.0
+            ),
+        ]
+        with mock.patch.dict(os.environ, {
+                "OPARA_TD_FINAL_SELECTOR": "guarded_interference",
+                "OPARA_TD_SPEEDUP_GUARD": "0.5",
+                "OPARA_TD_RISK_TRIGGER": "1.0"}):
+            scheduler = Scheduler(
+                ResourceModel(1, SM_SPECS, time_domain=True),
+                alpha=0.0,
+                selection_mode="max_occupancy",
+                time_domain=True,
+            )
+            selected = scheduler.schedule(operators, 0.0)
+
+        self.assertEqual(
+            [operator.name for operator in selected],
+            ["compute_a", "compute_b"],
+        )
+
     def test_shared_timeline_runs_large_grid_in_waves(self):
         model = ResourceModel(1, SM_SPECS, time_domain=True)
         large = make_operator("large", blocks=5, warps=2)

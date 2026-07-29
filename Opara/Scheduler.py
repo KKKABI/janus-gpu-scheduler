@@ -923,6 +923,11 @@ class Scheduler:
         ))
         if not 0.0 <= self.timeline_speedup_guard <= 1.0:
             raise ValueError("OPARA_TD_SPEEDUP_GUARD must be in [0, 1]")
+        self.interference_risk_trigger = float(os.environ.get(
+            "OPARA_TD_RISK_TRIGGER", "0.1"
+        ))
+        if not 0.0 <= self.interference_risk_trigger <= 1.0:
+            raise ValueError("OPARA_TD_RISK_TRIGGER must be in [0, 1]")
         self._interference_profile_cache = {}
         self._schedule_call = 0
 
@@ -1188,6 +1193,9 @@ class Scheduler:
             ),
             'timeline_speedup_guard': (
                 self.timeline_speedup_guard if self.time_domain else None
+            ),
+            'interference_risk_trigger': (
+                self.interference_risk_trigger if self.time_domain else None
             ),
             'timeline_shortlist_limit': (
                 (
@@ -1495,29 +1503,36 @@ class Scheduler:
                 raise RuntimeError(
                     "no stage-1 finalist completed the shared TD timeline"
                 )
+            best_item = max(timeline_ranked, key=lambda item: item[:3])
             if self.final_selector == "strategy":
                 selected_combo = timeline_ranked[0][3]
             elif self.final_selector == "timeline":
-                selected_combo = max(
-                    timeline_ranked, key=lambda item: item[:3]
-                )[3]
+                selected_combo = best_item[3]
             else:
-                best_speedup = max(item[0] for item in timeline_ranked)
+                best_speedup = best_item[0]
+                best_risk = combo_metrics[
+                    id(best_item[3])
+                ]["interference"]["risk"]
                 speedup_floor = 1.0 + self.timeline_speedup_guard * max(
                     0.0, best_speedup - 1.0
                 )
-                guarded = [
-                    item for item in timeline_ranked
-                    if item[0] + 1e-12 >= speedup_floor
-                ]
+                guard_activated = best_risk >= self.interference_risk_trigger
+                guarded = (
+                    [
+                        item for item in timeline_ranked
+                        if item[0] + 1e-12 >= speedup_floor
+                    ]
+                    if guard_activated else [best_item]
+                )
                 if not guarded:
-                    guarded = [max(
-                        timeline_ranked, key=lambda item: item[:3]
-                    )]
+                    guarded = [best_item]
                 for _, _, _, combo in timeline_ranked:
                     combo_metrics[id(combo)][
                         "selector_speedup_floor"
                     ] = speedup_floor
+                    combo_metrics[id(combo)][
+                        "selector_guard_activated"
+                    ] = guard_activated
                 selected_combo = min(
                     guarded,
                     key=lambda item: (
@@ -1527,7 +1542,6 @@ class Scheduler:
                         combo_metrics[id(item[3])]["stage1_rank"],
                     ),
                 )[3]
-            best_item = max(timeline_ranked, key=lambda item: item[:3])
             selected_metrics = combo_metrics[id(selected_combo)]
             selected_metrics["final_selector"] = self.final_selector
             selected_metrics["selector_best_speedup"] = best_item[0]

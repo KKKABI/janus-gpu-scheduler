@@ -1486,6 +1486,21 @@ class Scheduler:
                         combo_metrics[id(item[3])]["stage1_rank"],
                     ),
                 )[3]
+            best_item = max(timeline_ranked, key=lambda item: item[:3])
+            selected_metrics = combo_metrics[id(selected_combo)]
+            selected_metrics["final_selector"] = self.final_selector
+            selected_metrics["selector_best_speedup"] = best_item[0]
+            selected_metrics["selector_best_speedup_risk"] = (
+                combo_metrics[id(best_item[3])]["interference"]["risk"]
+            )
+            selected_metrics["selector_selected_speedup_loss"] = max(
+                0.0, best_item[0] - selected_metrics["predicted_speedup"]
+            )
+            selected_metrics["selector_eligible_count"] = (
+                len(guarded)
+                if self.final_selector == "guarded_interference"
+                else len(timeline_ranked)
+            )
             return finish(selected_combo)
 
         # 如果没有满足阈值的候选，则退回到单纯的最大占用组合

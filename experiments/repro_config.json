@@ -167,6 +167,24 @@
       "role": "proposed"
     },
     {
+      "label": "TD+GuardedDRT-g0.75",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "guarded_interference",
+      "timeline_speedup_guard": 0.75,
+      "role": "guard_tuning"
+    },
+    {
+      "label": "TD+GuardedDRT-g0.5",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "guarded_interference",
+      "timeline_speedup_guard": 0.5,
+      "role": "guard_tuning"
+    },
+    {
       "label": "Static+MinRes",
       "simulator": "static",
       "score": "min_resource",

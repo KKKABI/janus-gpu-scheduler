@@ -356,6 +356,7 @@ def get_topo(fx_nodes):
 def recompile(model_class_name, graph_module, inputs, all_streams, max_width, alpha=0.9, selection_mode='cosine', time_domain=True, exclude_metadata=False):
     
     path = os.path.abspath(os.path.dirname(__file__))
+    ncu_model_class_name = model_class_name
     # model_class_name = graph_module.__class__.__name__
     for i in inputs:
         model_class_name += "_" + str(i.shape)
@@ -375,7 +376,7 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, al
     # 可选：用 Nsight Compute 获取 memory 指标
     try:
         from Opara.ncu_profiler import profile_and_merge
-        profile_and_merge(graph_module, inputs, model_class_name.replace('_' + str(inputs[0].shape), ''))
+        profile_and_merge(graph_module, inputs, ncu_model_class_name)
     except Exception:
         pass  # ncu 不可用或超时，退回到无 memory 数据模式
 

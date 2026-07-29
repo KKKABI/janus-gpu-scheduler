@@ -194,6 +194,16 @@ def main() -> int:
             item["interference"] for item in selected_timelines
             if "interference" in item
         ]
+        selected_concurrent_interference = [
+            item["selected_timeline"]["interference"]
+            for item in scheduler_calls
+            if item.get("selected_resource_size", 0) >= 2
+            and "selected_timeline" in item
+            and "interference" in item["selected_timeline"]
+        ]
+        concurrent_risks = sorted(
+            item["risk"] for item in selected_concurrent_interference
+        )
         scheduler_summary = {
             "capture_build_seconds": capture_build_seconds,
             "max_ready": args.max_ready,
@@ -269,6 +279,25 @@ def main() -> int:
                 sum(item["ncu_coverage"] for item in selected_interference)
                 / len(selected_interference)
                 if selected_interference else None
+            ),
+            "selected_concurrent_call_count": len(
+                selected_concurrent_interference
+            ),
+            "selected_concurrent_call_rate": (
+                len(selected_concurrent_interference) / len(scheduler_calls)
+                if scheduler_calls else 0.0
+            ),
+            "selected_concurrent_interference_mean_risk": (
+                sum(concurrent_risks) / len(concurrent_risks)
+                if concurrent_risks else None
+            ),
+            "selected_concurrent_interference_p95_risk": (
+                concurrent_risks[
+                    max(0, math.ceil(0.95 * len(concurrent_risks)) - 1)
+                ] if concurrent_risks else None
+            ),
+            "selected_concurrent_interference_max_risk": (
+                concurrent_risks[-1] if concurrent_risks else None
             ),
         }
         with torch.no_grad(): candidate = runner(*inputs)

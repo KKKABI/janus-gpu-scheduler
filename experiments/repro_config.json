@@ -168,6 +168,36 @@
       "role": "proposed"
     },
     {
+      "label": "TD+RiskAdjustedDRT",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "risk_adjusted_interference",
+      "interference_risk_trigger": 0.1,
+      "interference_risk_penalty": 0.5,
+      "role": "proposed_v2"
+    },
+    {
+      "label": "TD+RiskAdjustedDRT-p0.25",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "risk_adjusted_interference",
+      "interference_risk_trigger": 0.1,
+      "interference_risk_penalty": 0.25,
+      "role": "risk_penalty_tuning"
+    },
+    {
+      "label": "TD+RiskAdjustedDRT-p0.75",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "risk_adjusted_interference",
+      "interference_risk_trigger": 0.1,
+      "interference_risk_penalty": 0.75,
+      "role": "risk_penalty_tuning"
+    },
+    {
       "label": "TD+GuardedDRT-g0.75",
       "simulator": "td",
       "score": "drt_no_alpha",

@@ -1,0 +1,268 @@
+{
+  "_5x_cudnn_ampere_scudnn_128x128_relu_medium_nn_v1": {
+    "comp_thru": 44.0,
+    "dram_thru": 20.85,
+    "dur_ns": 51680.0,
+    "l2_thru": 13.29,
+    "mem_thru": 38.25
+  },
+  "_5x_cudnn_ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile148n_nt_v1": {
+    "comp_thru": 32.08,
+    "dram_thru": 4.42,
+    "dur_ns": 89520.0,
+    "l2_thru": 24.18,
+    "mem_thru": 34.76
+  },
+  "_5x_cudnn_ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile148t_nt_v1": {
+    "comp_thru": 49.9,
+    "dram_thru": 6.28,
+    "dur_ns": 76460.0,
+    "l2_thru": 30.28,
+    "mem_thru": 49.9
+  },
+  "ampere_sgemm_32x32_sliced1x4_nn": {
+    "comp_thru": 5.7,
+    "dram_thru": 1.745,
+    "dur_ns": 8800.0,
+    "l2_thru": 3.1950000000000003,
+    "mem_thru": 5.710000000000001
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f32_nhwckrsc_nchw_tilesize64x32x64_stage4_warpsize2x2x1_g1_tensor16x8x8_alignc4_execute_kernel__5x_cudnn": {
+    "comp_thru": 23.908571428571427,
+    "dram_thru": 16.843333333333334,
+    "dur_ns": 40982.380952380954,
+    "l2_thru": 33.76952380952381,
+    "mem_thru": 34.19047619047619
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f32_nhwckrsc_nhwc_tilesize128x64x32_stage4_warpsize2x2x1_g1_tensor16x8x8_execute_kernel__5x_cudnn": {
+    "comp_thru": 64.48,
+    "dram_thru": 19.38,
+    "dur_ns": 98880.0,
+    "l2_thru": 47.87,
+    "mem_thru": 47.87
+  },
+  "sm86_xmma_fprop_implicit_gemm_indexed_tf32f32_tf32f32_f32_nhwckrsc_nhwc_tilesize64x64x64_stage3_warpsize2x2x1_g1_tensor16x8x8_execute_kernel__5x_cudnn": {
+    "comp_thru": 41.34285714285714,
+    "dram_thru": 8.088571428571429,
+    "dur_ns": 87116.42857142857,
+    "l2_thru": 38.15392857142857,
+    "mem_thru": 38.15392857142857
+  },
+  "sm86_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nhwckrsc_nchw_tilesize128x64x32_stage4_warpsize2x2x1_g1_tensor16x8x8_alignc4_execute_kernel__5x_cudnn": {
+    "comp_thru": 42.84,
+    "dram_thru": 5.28,
+    "dur_ns": 192860.0,
+    "l2_thru": 42.42,
+    "mem_thru": 42.42
+  },
+  "std::enable_if<!T7, void>::type internal::kernel<int, int, float, float, float, float, 0, 1, 0, 0, 6, 0, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<const float>, cublasGemvTensorStridedBatched<const float>, cublasGemvTensorStridedBatched<float>, float>>(T13)": {
+    "comp_thru": 8.36,
+    "dram_thru": 15.03,
+    "dur_ns": 4860.0,
+    "l2_thru": 8.15,
+    "mem_thru": 15.03
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 3, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)": {
+    "comp_thru": 8.82,
+    "dram_thru": 0.89,
+    "dur_ns": 5760.0,
+    "l2_thru": 1.64,
+    "mem_thru": 2.38
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_contig<at::<unnamed>::OpaqueType<4>, unsigned int, 3, 128, 1>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)": {
+    "comp_thru": 17.28,
+    "dram_thru": 17.37333333333333,
+    "dur_ns": 5236.666666666667,
+    "l2_thru": 15.763333333333334,
+    "mem_thru": 17.37333333333333
+  },
+  "void at::<unnamed>::CatArrayBatchedCopy_aligned16_contig<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 128, 1>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)": {
+    "comp_thru": 44.10230769230769,
+    "dram_thru": 47.085384615384605,
+    "dur_ns": 12503.076923076924,
+    "l2_thru": 28.764615384615386,
+    "mem_thru": 47.085384615384605
+  },
+  "void at::<unnamed>::cunn_SpatialSoftMaxForward<float, float, float, int, at::<unnamed>::SoftMaxForwardEpilogue>(T3 *, const T1 *, T4, T4, T4)": {
+    "comp_thru": 4.65,
+    "dram_thru": 3.86,
+    "dur_ns": 19040.0,
+    "l2_thru": 4.65,
+    "mem_thru": 4.65
+  },
+  "void at::<unnamed>::max_pool_forward_nchw<float, float>(int, const T1 *, long, long, long, int, int, int, int, int, int, int, int, int, int, T1 *, long *)": {
+    "comp_thru": 27.01,
+    "dram_thru": 2.06,
+    "dur_ns": 8680.0,
+    "l2_thru": 4.13,
+    "mem_thru": 8.96
+  },
+  "void at::<unnamed>::upsample_nearest2d_out_frame<float, &at::nearest_neighbor_compute_source_index>(const T1 *, T1 *, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, float, float)": {
+    "comp_thru": 34.93,
+    "dram_thru": 18.805,
+    "dur_ns": 12800.0,
+    "l2_thru": 16.82,
+    "mem_thru": 22.805
+  },
+  "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)": {
+    "comp_thru": 1.14,
+    "dram_thru": 1.68,
+    "dur_ns": 4190.0,
+    "l2_thru": 2.28,
+    "mem_thru": 2.28
+  },
+  "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)": {
+    "comp_thru": 4.592499999999999,
+    "dram_thru": 4.8175,
+    "dur_ns": 4400.0,
+    "l2_thru": 4.8225,
+    "mem_thru": 4.955
+  },
+  "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)": {
+    "comp_thru": 14.76,
+    "dram_thru": 14.52,
+    "dur_ns": 5150.0,
+    "l2_thru": 13.55,
+    "mem_thru": 14.52
+  },
+  "void at::vectorized_elementwise_kernel<4, at::<unnamed>::silu_kernel(at::TensorIteratorBase &)::[lambda() (instance 1)]::operator ()() const::[lambda() (instance 2)]::operator ()() const::[lambda(float) (instance 1)], detail::Array<char *, 2>>(int, T2, T3)": {
+    "comp_thru": 12.575979381443299,
+    "dram_thru": 24.841237113402062,
+    "dur_ns": 5010.618556701031,
+    "l2_thru": 19.38762886597938,
+    "mem_thru": 24.86618556701031
+  },
+  "void at::vectorized_elementwise_kernel<4, at::BUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, detail::Array<char *, 2>>(int, T2, T3)": {
+    "comp_thru": 0.11,
+    "dram_thru": 0.89,
+    "dur_ns": 3070.0,
+    "l2_thru": 1.58,
+    "mem_thru": 1.58
+  },
+  "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, detail::Array<char *, 3>>(int, T2, T3)": {
+    "comp_thru": 2.8225,
+    "dram_thru": 35.218500000000006,
+    "dur_ns": 5441.5,
+    "l2_thru": 22.722500000000004,
+    "mem_thru": 35.2505
+  },
+  "void at::vectorized_elementwise_kernel<4, at::sigmoid_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 2)]::operator ()() const::[lambda(float) (instance 1)], detail::Array<char *, 2>>(int, T2, T3)": {
+    "comp_thru": 10.67,
+    "dram_thru": 21.43,
+    "dur_ns": 4350.0,
+    "l2_thru": 19.57,
+    "mem_thru": 21.43
+  },
+  "void cask__5x_cudnn::computeOffsetsKernel<0, 0>(cask__5x_cudnn::ComputeOffsetsParams)": {
+    "comp_thru": 8.74,
+    "dram_thru": 0.17,
+    "dur_ns": 3490.0,
+    "l2_thru": 4.04,
+    "mem_thru": 4.04
+  },
+  "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 1, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T5 *, T5 *, const T6 *, const T6 *, const T7 *, const T4 *, T7 *, void *, long, T6 *, int *)": {
+    "comp_thru": 14.61,
+    "dram_thru": 21.667499999999997,
+    "dur_ns": 6057.5,
+    "l2_thru": 14.1175,
+    "mem_thru": 21.667499999999997
+  },
+  "void cudnn::bn_fw_inf_1C11_kernel_NCHW<float, float, 1, 1>(T2, T2, cudnnTensorStruct, const T1 *, cudnnTensorStruct, T1 *, cudnnTensorStruct, const T2 *, const T2 *, const T2 *, const T2 *, T2)": {
+    "comp_thru": 11.139278350515465,
+    "dram_thru": 19.671649484536083,
+    "dur_ns": 6608.762886597938,
+    "l2_thru": 15.216494845360824,
+    "mem_thru": 19.83123711340206
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x128_16x5_nn_align4>(T1::Params)": {
+    "comp_thru": 50.36,
+    "dram_thru": 17.61,
+    "dur_ns": 68100.0,
+    "l2_thru": 31.58,
+    "mem_thru": 31.58
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x64_16x6_nn_align4>(T1::Params)": {
+    "comp_thru": 43.17,
+    "dram_thru": 14.42,
+    "dur_ns": 33870.0,
+    "l2_thru": 38.14,
+    "mem_thru": 38.14
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_256x128_16x3_nn_align4>(T1::Params)": {
+    "comp_thru": 52.58,
+    "dram_thru": 28.01,
+    "dur_ns": 47120.0,
+    "l2_thru": 28.34,
+    "mem_thru": 28.82
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_256x64_16x4_nn_align4>(T1::Params)": {
+    "comp_thru": 35.02,
+    "dram_thru": 14.62,
+    "dur_ns": 29410.0,
+    "l2_thru": 30.47,
+    "mem_thru": 30.47
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x128_16x6_nn_align4>(T1::Params)": {
+    "comp_thru": 38.76,
+    "dram_thru": 18.0,
+    "dur_ns": 53730.0,
+    "l2_thru": 38.7,
+    "mem_thru": 38.7
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x64_16x10_nn_align4>(T1::Params)": {
+    "comp_thru": 27.57,
+    "dram_thru": 20.83,
+    "dur_ns": 13920.0,
+    "l2_thru": 30.65,
+    "mem_thru": 30.65
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x64_16x6_nn_align4>(T1::Params)": {
+    "comp_thru": 14.629999999999999,
+    "dram_thru": 13.305,
+    "dur_ns": 10415.0,
+    "l2_thru": 21.1,
+    "mem_thru": 21.1
+  },
+  "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x64_32x6_nn_align4>(T1::Params)": {
+    "comp_thru": 28.131999999999998,
+    "dram_thru": 18.058,
+    "dur_ns": 52694.0,
+    "l2_thru": 38.202999999999996,
+    "mem_thru": 38.202999999999996
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fprop_optimized_tf32_128x64_16x6_nhwc_align4>(T1::Params)": {
+    "comp_thru": 58.26,
+    "dram_thru": 19.07,
+    "dur_ns": 86180.0,
+    "l2_thru": 53.87,
+    "mem_thru": 53.87
+  },
+  "void cutlass__5x_cudnn::Kernel<cutlass_tensorop_s1688fprop_optimized_tf32_64x64_32x5_nhwc_align4>(T1::Params)": {
+    "comp_thru": 58.25,
+    "dram_thru": 18.45,
+    "dur_ns": 71040.0,
+    "l2_thru": 68.18,
+    "mem_thru": 68.18
+  },
+  "void engines_precompiled::nchwToNhwcKernel<float, float, float, 0, 1, 2>(engines_precompiled::nchw2nhwc_params_t<T3>, const T1 *, T2 *)": {
+    "comp_thru": 34.180092592592594,
+    "dram_thru": 28.391388888888887,
+    "dur_ns": 12623.703703703704,
+    "l2_thru": 18.09,
+    "mem_thru": 30.161759259259256
+  },
+  "void engines_precompiled::nhwcToNchwKernel<float, float, float, 1, 0, 0>(engines_precompiled::nhwc2nchw_params_t<T3>, const T1 *, T2 *)": {
+    "comp_thru": 12.451612903225806,
+    "dram_thru": 18.834838709677424,
+    "dur_ns": 5052.580645161291,
+    "l2_thru": 15.507741935483871,
+    "mem_thru": 18.844838709677422
+  },
+  "void winograd::generateWinogradTilesKernel<0, float, float>(winograd::GenerateWinogradTilesParams<T2, T3>)": {
+    "comp_thru": 14.9975,
+    "dram_thru": 22.16,
+    "dur_ns": 5542.5,
+    "l2_thru": 23.252499999999998,
+    "mem_thru": 23.334999999999997
+  }
+}

@@ -245,6 +245,42 @@ class TimeDomainSimulatorTests(unittest.TestCase):
             ["compute_a", "compute_b"],
         )
 
+    def test_risk_adjusted_selector_can_serialize_high_risk_pair(self):
+        clear_candidate_stats()
+        operators = [make_operator("a"), make_operator("b")]
+
+        def interference(combo):
+            risk = 0.9 if len(combo) > 1 else 0.0
+            return {
+                "risk": risk,
+                "pair_conflict": risk,
+                "capacity_overload": 0.0,
+                "duration_tail": 0.0,
+                "ncu_coverage": 1.0,
+                "pair_count": 1 if len(combo) > 1 else 0,
+            }
+
+        with mock.patch.dict(os.environ, {
+                "OPARA_TD_FINAL_SELECTOR": "risk_adjusted_interference",
+                "OPARA_TD_RISK_TRIGGER": "0.1",
+                "OPARA_TD_RISK_PENALTY": "1.0"}):
+            scheduler = Scheduler(
+                ResourceModel(1, SM_SPECS, time_domain=True),
+                alpha=0.0,
+                selection_mode="max_occupancy",
+                time_domain=True,
+            )
+            with mock.patch.object(
+                    scheduler,
+                    "_combo_interference_metrics",
+                    side_effect=interference):
+                selected = scheduler.schedule(operators, 0.0)
+
+        stats = get_candidate_stats(clear=True)[0]["selected_timeline"]
+        self.assertEqual(len(selected), 1)
+        self.assertTrue(stats["selector_guard_activated"])
+        self.assertEqual(stats["selector_risk_adjusted_utility"], 0.0)
+
     def test_shared_timeline_runs_large_grid_in_waves(self):
         model = ResourceModel(1, SM_SPECS, time_domain=True)
         large = make_operator("large", blocks=5, warps=2)

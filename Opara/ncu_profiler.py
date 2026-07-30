@@ -11,6 +11,73 @@ ncu_data 结构：{kernel_short_name: {mem_thru, dram_thru, l2_thru, comp_thru, 
 import subprocess, csv, io, os, json, tempfile
 
 
+_NCU_METRIC_FIELDS = {
+    'Memory Throughput': 'mem_thru',
+    'DRAM Throughput': 'dram_thru',
+    'L2 Cache Throughput': 'l2_thru',
+    'Compute (SM) Throughput': 'comp_thru',
+    'Duration': 'dur_ns',
+}
+
+
+def _parse_ncu_number(value):
+    """Parse NCU's locale-formatted numeric cells (for example ``1,024``)."""
+    if value is None:
+        return 0.0
+    value = str(value).strip().replace(',', '')
+    return float(value) if value else 0.0
+
+
+def parse_ncu_csv(csv_text):
+    """Parse per-launch or per-kernel-summary NCU CSV into cache entries."""
+    lines = [line for line in csv_text.splitlines() if line.strip()]
+    header_idx = next(
+        (index for index, line in enumerate(lines)
+         if '"Kernel Name"' in line and '"Metric Name"' in line),
+        None,
+    )
+    if header_idx is None:
+        return {}
+
+    reader = csv.DictReader(io.StringIO('\n'.join(lines[header_idx:])))
+    aggregates = {}
+    for row in reader:
+        kernel_name = (row.get('Kernel Name') or '').strip()
+        field = _NCU_METRIC_FIELDS.get((row.get('Metric Name') or '').strip())
+        if not kernel_name or not field:
+            continue
+        value = _parse_ncu_number(
+            row.get('Average')
+            if row.get('Average') not in (None, '')
+            else row.get('Metric Value')
+        )
+        if field == 'dur_ns':
+            value *= {
+                'ns': 1.0,
+                'us': 1_000.0,
+                'ms': 1_000_000.0,
+                's': 1_000_000_000.0,
+            }.get((row.get('Metric Unit') or 'ns').strip(), 1.0)
+        invocations = max(1.0, _parse_ncu_number(row.get('Invocations') or 1))
+        entry = aggregates.setdefault(kernel_name, {})
+        weighted_sum, weight = entry.get(field, (0.0, 0.0))
+        entry[field] = (
+            weighted_sum + value * invocations,
+            weight + invocations,
+        )
+
+    result = {}
+    for kernel_name, fields in aggregates.items():
+        result[kernel_name] = {
+            field: (
+                fields[field][0] / fields[field][1]
+                if field in fields and fields[field][1] else 0.0
+            )
+            for field in _NCU_METRIC_FIELDS.values()
+        }
+    return result
+
+
 def profile_ncu(graph_module, inputs, ncu_bin="/usr/local/cuda-12.5/bin/ncu"):
     """用 ncu 对模型做单次推理 profiling，返回 per-kernel 指标字典。
 
@@ -63,42 +130,7 @@ torch.cuda.synchronize()
         os.unlink(script_path)
         return {}
 
-    # 解析 CSV
-    lines = [l for l in result.stdout.split('\n') if l.strip() and '==PROF' not in l]
-    for i, l in enumerate(lines):
-        if '"Process ID"' in l:
-            header_idx = i
-            break
-    else:
-        return {}
-
-    csv_data = '\n'.join(lines[header_idx:])
-    reader = csv.DictReader(io.StringIO(csv_data))
-
-    kernel_data = {}
-    for row in reader:
-        kname = row['Kernel Name'].split('(')[0].strip()[:55]
-        if kname not in kernel_data:
-            kernel_data[kname] = {}
-
-        section = row['Section Name']
-        metric = row['Metric Name']
-        avg = row['Average']
-
-        if section == 'GPU Speed Of Light Throughput':
-            kernel_data[kname][metric] = float(avg) if avg else 0.0
-
-    # 精简为需要的指标
-    result = {}
-    for kname, metrics in kernel_data.items():
-        result[kname] = {
-            'mem_thru': metrics.get('Memory Throughput', 0.0),
-            'dram_thru': metrics.get('DRAM Throughput', 0.0),
-            'l2_thru': metrics.get('L2 Cache Throughput', 0.0),
-            'comp_thru': metrics.get('Compute (SM) Throughput', 0.0),
-            'dur_ns': metrics.get('Duration', 0.0),
-        }
-    return result
+    return parse_ncu_csv(result.stdout)
 
 
 def merge_ncu_to_nodes(nodes, ncu_data):

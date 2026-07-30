@@ -130,6 +130,10 @@ def variant_parameters(task: Task, config: dict[str, Any]) -> dict[str, Any]:
             float(spec.get("interference_risk_trigger", 0.1))
             if spec["simulator"] == "td" else None
         ),
+        "interference_risk_penalty": (
+            float(spec.get("interference_risk_penalty", 0.5))
+            if spec["simulator"] == "td" else None
+        ),
         "simulator_semantics": (
             "shared_candidate_timeline_v1"
             if spec["simulator"] == "td"
@@ -189,6 +193,10 @@ def main() -> int:
         if params["interference_risk_trigger"] is not None:
             os.environ["OPARA_TD_RISK_TRIGGER"] = str(
                 params["interference_risk_trigger"]
+            )
+        if params["interference_risk_penalty"] is not None:
+            os.environ["OPARA_TD_RISK_PENALTY"] = str(
+                params["interference_risk_penalty"]
             )
         capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
         capture_started = time.perf_counter()
@@ -310,6 +318,17 @@ def main() -> int:
             ),
             "selected_concurrent_interference_max_risk": (
                 concurrent_risks[-1] if concurrent_risks else None
+            ),
+            "selector_guard_activation_count": sum(
+                bool(item.get("selector_guard_activated"))
+                for item in selected_timelines
+            ),
+            "selector_selected_speedup_loss_mean": (
+                sum(
+                    float(item.get("selector_selected_speedup_loss", 0.0))
+                    for item in selected_timelines
+                ) / len(selected_timelines)
+                if selected_timelines else None
             ),
         }
         with torch.no_grad(): candidate = runner(*inputs)

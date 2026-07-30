@@ -159,6 +159,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 *.nsys-rep
+*.ncu-rep
 *.qdrep
 result/
 output.txt
@@ -166,6 +167,7 @@ node2kernels.txt
 
 # Profile cache files
 Opara/profile_result/
+experiments/ncu_raw/
 
 # Claude
 .claude/

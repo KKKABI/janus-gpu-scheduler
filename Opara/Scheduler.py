@@ -913,10 +913,12 @@ class Scheduler:
             "OPARA_TD_FINAL_SELECTOR", "timeline"
         )
         if self.final_selector not in {
-                "strategy", "timeline", "guarded_interference"}:
+                "strategy", "timeline", "guarded_interference",
+                "risk_adjusted_interference"}:
             raise ValueError(
                 "OPARA_TD_FINAL_SELECTOR must be one of "
-                "strategy, timeline, guarded_interference"
+                "strategy, timeline, guarded_interference, "
+                "risk_adjusted_interference"
             )
         self.timeline_speedup_guard = float(os.environ.get(
             "OPARA_TD_SPEEDUP_GUARD", "0.9"
@@ -928,6 +930,11 @@ class Scheduler:
         ))
         if not 0.0 <= self.interference_risk_trigger <= 1.0:
             raise ValueError("OPARA_TD_RISK_TRIGGER must be in [0, 1]")
+        self.interference_risk_penalty = float(os.environ.get(
+            "OPARA_TD_RISK_PENALTY", "0.5"
+        ))
+        if self.interference_risk_penalty < 0.0:
+            raise ValueError("OPARA_TD_RISK_PENALTY must be >= 0")
         self._interference_profile_cache = {}
         self._schedule_call = 0
 
@@ -1185,6 +1192,9 @@ class Scheduler:
                     'strategy': 'strategy_score',
                     'timeline': 'predicted_speedup',
                     'guarded_interference': 'interference_guarded_speedup',
+                    'risk_adjusted_interference': (
+                        'risk_adjusted_time_saved'
+                    ),
                 }[self.final_selector] if self.time_domain
                 else 'strategy_score'
             ),
@@ -1197,10 +1207,19 @@ class Scheduler:
             'interference_risk_trigger': (
                 self.interference_risk_trigger if self.time_domain else None
             ),
+            'interference_risk_penalty': (
+                self.interference_risk_penalty
+                if self.time_domain
+                and self.final_selector == 'risk_adjusted_interference'
+                else None
+            ),
             'timeline_shortlist_limit': (
                 (
                     self.interference_shortlist_size
-                    if self.final_selector == 'guarded_interference'
+                    if self.final_selector in {
+                        'guarded_interference',
+                        'risk_adjusted_interference',
+                    }
                     else self.timeline_shortlist_size
                 ) if self.time_domain else 0
             ),
@@ -1428,7 +1447,10 @@ class Scheduler:
             else:
                 shortlist_limit = (
                     self.interference_shortlist_size
-                    if self.final_selector == "guarded_interference"
+                    if self.final_selector in {
+                        "guarded_interference",
+                        "risk_adjusted_interference",
+                    }
                     else self.timeline_shortlist_size
                 )
                 # Preserve one finalist from every available group size before
@@ -1443,7 +1465,10 @@ class Scheduler:
                     if len(finalists) >= shortlist_limit:
                         break
                 if (
-                    self.final_selector == "guarded_interference"
+                    self.final_selector in {
+                        "guarded_interference",
+                        "risk_adjusted_interference",
+                    }
                     and len(finalists) < shortlist_limit
                 ):
                     finalist_ids = {id(combo) for combo in finalists}
@@ -1508,7 +1533,7 @@ class Scheduler:
                 selected_combo = timeline_ranked[0][3]
             elif self.final_selector == "timeline":
                 selected_combo = best_item[3]
-            else:
+            elif self.final_selector == "guarded_interference":
                 best_speedup = best_item[0]
                 best_risk = combo_metrics[
                     id(best_item[3])
@@ -1542,6 +1567,37 @@ class Scheduler:
                         combo_metrics[id(item[3])]["stage1_rank"],
                     ),
                 )[3]
+            else:
+                best_risk = combo_metrics[
+                    id(best_item[3])
+                ]["interference"]["risk"]
+                guard_activated = best_risk >= self.interference_risk_trigger
+                for item in timeline_ranked:
+                    metrics = combo_metrics[id(item[3])]
+                    risk = metrics["interference"]["risk"]
+                    utility = (
+                        metrics["normalized_time_saved"]
+                        - self.interference_risk_penalty * risk
+                    )
+                    metrics["selector_guard_activated"] = guard_activated
+                    metrics["selector_risk_penalty"] = (
+                        self.interference_risk_penalty
+                    )
+                    metrics["selector_risk_adjusted_utility"] = utility
+                selected_combo = (
+                    max(
+                        timeline_ranked,
+                        key=lambda item: (
+                            combo_metrics[id(item[3])][
+                                "selector_risk_adjusted_utility"
+                            ],
+                            item[0],
+                            item[1],
+                            -combo_metrics[id(item[3])]["stage1_rank"],
+                        ),
+                    )[3]
+                    if guard_activated else best_item[3]
+                )
             selected_metrics = combo_metrics[id(selected_combo)]
             selected_metrics["final_selector"] = self.final_selector
             selected_metrics["selector_best_speedup"] = best_item[0]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare selected co-run interference using the measured pair cache."""
+"""Compare selected co-run interference using a measured pair cache."""
 
 from __future__ import annotations
 
@@ -133,31 +133,42 @@ def median_field(runs, field):
 def render_report(comparison):
     variants = comparison["variants"]
     baseline = variants["TD+Janus-no-alpha"]
-    empirical = variants["TD+EmpiricalDRT"]
+    empirical_name = (
+        "TD+EmpiricalGuardDRT"
+        if "TD+EmpiricalGuardDRT" in variants
+        else "TD+EmpiricalDRT"
+    )
+    empirical = variants[empirical_name]
     latency_delta = 100.0 * (
         empirical["median_of_process_medians_ms"]
         / baseline["median_of_process_medians_ms"] - 1.0
     )
-    excess_dilation_reduction = 100.0 * (
-        1.0
-        - (empirical["max_makespan_dilation"] - 1.0)
-        / (baseline["max_makespan_dilation"] - 1.0)
+    baseline_excess = baseline["max_makespan_dilation"] - 1.0
+    excess_dilation_reduction = (
+        100.0 * (
+            1.0
+            - (empirical["max_makespan_dilation"] - 1.0)
+            / baseline_excess
+        )
+        if baseline_excess > 0.0 else None
     )
     max_slowdown_reduction = 100.0 * (
         1.0 - empirical["max_slowdown"] / baseline["max_slowdown"]
     )
     lines = [
-        "# YOLOv8 调度策略正式对照",
+        f"# {comparison['model']} 调度策略正式对照",
         "",
         "| Strategy | Median latency (ms) | Concurrent calls | Negative-utility calls | Mean dilation | Max dilation | Mean max slowdown | Max slowdown | Mean utility |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    order = (
+    preferred_order = (
         "TD+Janus-no-alpha",
         "TD+GuardedDRT",
         "TD+RiskAdjustedDRT",
         "TD+EmpiricalDRT",
+        "TD+EmpiricalGuardDRT",
     )
+    order = [name for name in preferred_order if name in variants]
     for name in order:
         item = variants[name]
         lines.append(
@@ -174,11 +185,22 @@ def render_report(comparison):
         "",
         "## 结论",
         "",
-        f"- 相对 TD+Janus，TD+EmpiricalDRT 的端到端中位时延变化为 {latency_delta:+.2f}%。",
-        f"- 最坏整组额外膨胀（dilation−1）降低 {excess_dilation_reduction:.1f}%。",
+        f"- 相对 TD+Janus，{empirical_name} 的端到端中位时延变化为 "
+        f"{latency_delta:+.2f}%。",
+        (
+            f"- 最坏整组额外膨胀（dilation−1）降低 "
+            f"{excess_dilation_reduction:.1f}%。"
+            if excess_dilation_reduction is not None
+            else "- Janus 的最坏整组 dilation 未超过 1，无法计算额外膨胀降幅。"
+        ),
         f"- 最坏单算子 slowdown 降低 {max_slowdown_reduction:.1f}%。",
         f"- 负经验效用的并发选择从 {baseline['negative_utility_call_count']:.0f} 次降为 {empirical['negative_utility_call_count']:.0f} 次。",
-        "- GuardedDRT 与 Janus 的调度序列相同；其时延差异属于同调度测量波动，不能解释成算法收益。",
+    ])
+    if "TD+GuardedDRT" in variants:
+        lines.append(
+            "- GuardedDRT 与 Janus 若调度序列相同，其时延差异只能视为测量波动。",
+        )
+    lines.extend([
         "",
         "经验缓存中的算子名称仅作为 FX 节点标识；决策依据是实测 solo/co-run 时延，不使用名称类别规则。",
         "",
@@ -191,6 +213,7 @@ def main():
     cache_payload = json.loads(args.pair_cache.read_text(encoding="utf-8"))
     cache = cache_payload["pairs"]
     weights = cache_payload["utility_weights"]
+    model = cache_payload["model"]
     result_paths = sorted({
         path.resolve()
         for root in args.result_root
@@ -199,20 +222,16 @@ def main():
     grouped = {}
     for path in result_paths:
         result = json.loads(path.read_text(encoding="utf-8"))
-        if result.get("task", {}).get("model") != "YOLOv8x":
+        if result.get("task", {}).get("model") != model:
             continue
         grouped.setdefault(result["task"]["variant"], []).append(result)
 
-    required = {
-        "TD+Janus-no-alpha",
-        "TD+GuardedDRT",
-        "TD+RiskAdjustedDRT",
-        "TD+EmpiricalDRT",
-    }
-    if set(grouped) != required:
-        raise RuntimeError(
-            f"expected variants {sorted(required)}, got {sorted(grouped)}"
-        )
+    if "TD+Janus-no-alpha" not in grouped:
+        raise RuntimeError("missing required variant: TD+Janus-no-alpha")
+    if not {
+        "TD+EmpiricalDRT", "TD+EmpiricalGuardDRT"
+    }.intersection(grouped):
+        raise RuntimeError("missing an empirical DRT variant")
     variants = {}
     for name, results in grouped.items():
         if len(results) != 5:
@@ -242,7 +261,7 @@ def main():
         }
     comparison = {
         "schema_version": 1,
-        "model": "YOLOv8x",
+        "model": model,
         "pair_profile_count": cache_payload["pair_count"],
         "utility_weights": weights,
         "variants": variants,

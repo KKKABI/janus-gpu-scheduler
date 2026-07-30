@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure true solo/co-run interference for selected YOLOv8 FX operators."""
+"""Measure true solo/co-run interference for selected model FX operators."""
 
 from __future__ import annotations
 
@@ -175,6 +175,16 @@ PAIR_SPECS += (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model",
+        default="YOLOv8x",
+        choices=("YOLOv8x", "GoogLeNet", "ConvNeXt"),
+    )
+    parser.add_argument(
+        "--capture-backend",
+        default="auto",
+        choices=("auto", "make_fx", "dynamo_explain"),
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--samples", type=int, default=80)
     parser.add_argument("--inner-repeats", type=int, default=100)
@@ -215,6 +225,58 @@ def load_pair_specs(path=None):
         spec.setdefault("scheduler_decision", "candidate")
         seen_ids.add(spec["id"])
     return specs
+
+
+def load_model_and_inputs(name):
+    import torch
+
+    if name == "YOLOv8x":
+        from ultralytics import YOLO
+
+        model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model
+        inputs = (torch.randn((1, 3, 320, 320), device="cuda:0"),)
+    elif name == "GoogLeNet":
+        import torchvision
+
+        model = torchvision.models.googlenet(init_weights=True)
+        inputs = (torch.randint(
+            0, 256, (1, 3, 224, 224),
+            dtype=torch.float32, device="cuda:0",
+        ),)
+    elif name == "ConvNeXt":
+        import torchvision
+
+        model = torchvision.models.convnext_base(weights=None)
+        inputs = (torch.randn((1, 3, 224, 224), device="cuda:0"),)
+    else:
+        raise ValueError(f"unsupported model: {name}")
+    return model.to("cuda:0").eval(), inputs
+
+
+def capture_model_graph(model, inputs, backend):
+    import torch
+
+    if backend == "make_fx":
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.inference_mode():
+            graph_module = make_fx(model)(*inputs)
+    elif backend == "dynamo_explain":
+        import torch._dynamo as dynamo
+
+        dynamo.reset()
+        with torch.inference_mode():
+            result = dynamo.explain(model)(*inputs)
+        graphs = (
+            result[2] if isinstance(result, tuple)
+            else getattr(result, "graphs", None) or getattr(result, "graph", None)
+        )
+        if not graphs:
+            raise RuntimeError("dynamo.explain did not return a graph")
+        graph_module = graphs[0]
+    else:
+        raise ValueError(f"unsupported capture backend: {backend}")
+    return graph_module.to("cuda:0")
 
 
 def derive_pair_metrics(solo_a, solo_b, corun_a, corun_b, corun_makespan):
@@ -260,7 +322,8 @@ def record_operator_inputs(graph_module, inputs, target_names):
         def run_node(self, node):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
             if node.name in target_names and node.name not in self.records:
-                if node.op != "call_function":
+                if node.op not in {
+                        "call_function", "call_method", "call_module"}:
                     raise RuntimeError(
                         f"unsupported target node kind: {node.name}={node.op}"
                     )
@@ -270,6 +333,10 @@ def record_operator_inputs(graph_module, inputs, target_names):
                     "op": node.op,
                     "target": node.target,
                     "target_text": str(node.target),
+                    "module": (
+                        self.module.get_submodule(node.target)
+                        if node.op == "call_module" else None
+                    ),
                     "args": frozen_args,
                     "kwargs": frozen_kwargs,
                 }
@@ -286,7 +353,13 @@ def record_operator_inputs(graph_module, inputs, target_names):
 
 
 def invoke(record, args, kwargs):
-    return record["target"](*args, **kwargs)
+    if record["op"] == "call_function":
+        return record["target"](*args, **kwargs)
+    if record["op"] == "call_method":
+        return getattr(args[0], record["target"])(*args[1:], **kwargs)
+    if record["op"] == "call_module":
+        return record["module"](*args, **kwargs)
+    raise RuntimeError(f"unsupported target node kind: {record['op']}")
 
 
 def capture_repeated(record, stream, inner_repeats, warmup):
@@ -462,8 +535,6 @@ def main() -> int:
 
     import numpy as np
     import torch
-    from torch.fx.experimental.proxy_tensor import make_fx
-    from ultralytics import YOLO
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -473,12 +544,15 @@ def main() -> int:
     benchmark_specs = list(selected_specs)
     rng.shuffle(benchmark_specs)
 
-    model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model
-    model = model.to("cuda:0").eval()
-    inputs = (torch.randn((1, 3, 320, 320), device="cuda:0"),)
+    model, inputs = load_model_and_inputs(args.model)
     with torch.inference_mode():
-        model(*inputs)  # initialize YOLO anchor/stride caches before make_fx
-        graph_module = make_fx(model)(*inputs)
+        model(*inputs)  # initialize model-side caches before graph capture
+    capture_backend = args.capture_backend
+    if capture_backend == "auto":
+        capture_backend = (
+            "make_fx" if args.model == "YOLOv8x" else "dynamo_explain"
+        )
+    graph_module = capture_model_graph(model, inputs, capture_backend)
 
     target_names = {
         spec[key] for spec in selected_specs for key in ("a", "b")
@@ -495,11 +569,12 @@ def main() -> int:
     result = {
         "schema_version": 1,
         "status": "completed",
-        "model": "YOLOv8x",
+        "model": args.model,
         "model_class": model.__class__.__name__,
         "input_shapes": [list(tensor.shape) for tensor in inputs],
         "method": {
             "capture": "one CUDA graph per FX operator",
+            "capture_backend": capture_backend,
             "execution": "two independent CUDA streams",
             "sample_order": "seeded shuffle of solo_a, solo_b, corun",
             "samples": args.samples,

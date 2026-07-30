@@ -185,11 +185,14 @@ def main() -> int:
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
         params["max_ready"] = args.max_ready
-        if params["final_selector"] == "empirical_interference":
+        if params["final_selector"] in {
+            "empirical_interference",
+            "empirical_guarded_interference",
+        }:
             pair_profile_value = os.environ.get("OPARA_PAIR_PROFILE_PATH")
             if not pair_profile_value:
                 raise RuntimeError(
-                    "TD+EmpiricalDRT requires OPARA_PAIR_PROFILE_PATH"
+                    "empirical DRT variants require OPARA_PAIR_PROFILE_PATH"
                 )
             pair_profile_path = Path(pair_profile_value).resolve()
             if not pair_profile_path.is_file():

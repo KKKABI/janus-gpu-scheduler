@@ -915,11 +915,13 @@ class Scheduler:
         )
         if self.final_selector not in {
                 "strategy", "timeline", "guarded_interference",
-                "risk_adjusted_interference", "empirical_interference"}:
+                "risk_adjusted_interference", "empirical_interference",
+                "empirical_guarded_interference"}:
             raise ValueError(
                 "OPARA_TD_FINAL_SELECTOR must be one of "
                 "strategy, timeline, guarded_interference, "
-                "risk_adjusted_interference, empirical_interference"
+                "risk_adjusted_interference, empirical_interference, "
+                "empirical_guarded_interference"
             )
         self.timeline_speedup_guard = float(os.environ.get(
             "OPARA_TD_SPEEDUP_GUARD", "0.9"
@@ -954,10 +956,13 @@ class Scheduler:
                 pair_profile.get("utility_weights", {})
             )
         if (
-                self.final_selector == "empirical_interference"
+                self.final_selector in {
+                    "empirical_interference",
+                    "empirical_guarded_interference",
+                }
                 and not self.empirical_pair_profiles):
             raise ValueError(
-                "empirical_interference requires a non-empty "
+                "empirical interference selectors require a non-empty "
                 "OPARA_PAIR_PROFILE_PATH"
             )
         self.empirical_round_penalty = float(os.environ.get(
@@ -1340,6 +1345,9 @@ class Scheduler:
                         'risk_adjusted_time_saved'
                     ),
                     'empirical_interference': 'empirical_corun_utility',
+                    'empirical_guarded_interference': (
+                        'janus_guarded_empirical_utility'
+                    ),
                 }[self.final_selector] if self.time_domain
                 else 'strategy_score'
             ),
@@ -1361,19 +1369,28 @@ class Scheduler:
             'empirical_pair_profile_path': (
                 self.empirical_pair_profile_path
                 if self.time_domain
-                and self.final_selector == 'empirical_interference'
+                and self.final_selector in {
+                    'empirical_interference',
+                    'empirical_guarded_interference',
+                }
                 else None
             ),
             'empirical_round_penalty': (
                 self.empirical_round_penalty
                 if self.time_domain
-                and self.final_selector == 'empirical_interference'
+                and self.final_selector in {
+                    'empirical_interference',
+                    'empirical_guarded_interference',
+                }
                 else None
             ),
             'empirical_operator_penalty': (
                 self.empirical_operator_penalty
                 if self.time_domain
-                and self.final_selector == 'empirical_interference'
+                and self.final_selector in {
+                    'empirical_interference',
+                    'empirical_guarded_interference',
+                }
                 else None
             ),
             'timeline_shortlist_limit': (
@@ -1383,6 +1400,7 @@ class Scheduler:
                         'guarded_interference',
                         'risk_adjusted_interference',
                         'empirical_interference',
+                        'empirical_guarded_interference',
                     }
                     else self.timeline_shortlist_size
                 ) if self.time_domain else 0
@@ -1657,6 +1675,7 @@ class Scheduler:
                         "guarded_interference",
                         "risk_adjusted_interference",
                         "empirical_interference",
+                        "empirical_guarded_interference",
                     }
                     else self.timeline_shortlist_size
                 )
@@ -1676,6 +1695,7 @@ class Scheduler:
                         "guarded_interference",
                         "risk_adjusted_interference",
                         "empirical_interference",
+                        "empirical_guarded_interference",
                     }
                     and len(finalists) < shortlist_limit
                 ):
@@ -1719,7 +1739,9 @@ class Scheduler:
                 metrics["interference"] = self._combo_interference_metrics(
                     combo
                 )
-                if self.final_selector == "empirical_interference":
+                if self.final_selector in {
+                        "empirical_interference",
+                        "empirical_guarded_interference"}:
                     metrics["empirical"] = self._combo_empirical_metrics(
                         combo
                     )
@@ -1779,7 +1801,9 @@ class Scheduler:
                         combo_metrics[id(item[3])]["stage1_rank"],
                     ),
                 )[3]
-            elif self.final_selector == "empirical_interference":
+            elif self.final_selector in {
+                    "empirical_interference",
+                    "empirical_guarded_interference"}:
                 fully_profiled = all(
                     combo_metrics[id(item[3])]["empirical"][
                         "fully_covered"
@@ -1790,8 +1814,10 @@ class Scheduler:
                     combo_metrics[id(item[3])]["empirical"][
                         "selector_fallback"
                     ] = not fully_profiled
-                selected_combo = (
-                    max(
+                if not fully_profiled:
+                    selected_combo = best_item[3]
+                elif self.final_selector == "empirical_interference":
+                    selected_combo = max(
                         timeline_ranked,
                         key=lambda item: (
                             combo_metrics[id(item[3])]["empirical"][
@@ -1804,8 +1830,36 @@ class Scheduler:
                             -combo_metrics[id(item[3])]["stage1_rank"],
                         ),
                     )[3]
-                    if fully_profiled else best_item[3]
-                )
+                else:
+                    baseline_combo = best_item[3]
+                    baseline_utility = combo_metrics[id(baseline_combo)][
+                        "empirical"
+                    ]["utility"]
+                    guard_activated = baseline_utility <= 0.0
+                    for item in timeline_ranked:
+                        empirical = combo_metrics[id(item[3])]["empirical"]
+                        empirical["selector_baseline_utility"] = (
+                            baseline_utility
+                        )
+                        empirical["selector_guard_activated"] = (
+                            guard_activated
+                        )
+                    selected_combo = (
+                        max(
+                            timeline_ranked,
+                            key=lambda item: (
+                                combo_metrics[id(item[3])]["empirical"][
+                                    "utility"
+                                ],
+                                combo_metrics[id(item[3])]["empirical"].get(
+                                    "estimated_speedup", 0.0
+                                ),
+                                item[1],
+                                -combo_metrics[id(item[3])]["stage1_rank"],
+                            ),
+                        )[3]
+                        if guard_activated else baseline_combo
+                    )
             else:
                 best_risk = combo_metrics[
                     id(best_item[3])

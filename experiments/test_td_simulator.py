@@ -321,6 +321,111 @@ class TimeDomainSimulatorTests(unittest.TestCase):
         self.assertFalse(stats["empirical"]["selector_fallback"])
         self.assertEqual(stats["empirical"]["utility"], 0.0)
 
+    def test_empirical_guard_overrides_negative_janus_choice(self):
+        clear_candidate_stats()
+        cache = {
+            "utility_weights": {
+                "round_penalty": 0.5,
+                "operator_penalty": 0.1,
+            },
+            "pairs": {
+                "a|b": {
+                    "measured_pair_speedup": 1.01,
+                    "makespan_dilation": 1.0,
+                    "mean_slowdown": 1.5,
+                    "max_slowdown": 2.0,
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairs.json"
+            path.write_text(json.dumps(cache), encoding="utf-8")
+            with mock.patch.dict(os.environ, {
+                    "OPARA_TD_FINAL_SELECTOR": (
+                        "empirical_guarded_interference"
+                    ),
+                    "OPARA_PAIR_PROFILE_PATH": str(path)}):
+                scheduler = Scheduler(
+                    ResourceModel(1, SM_SPECS, time_domain=True),
+                    alpha=0.0,
+                    selection_mode="max_occupancy",
+                    time_domain=True,
+                )
+                selected = scheduler.schedule(
+                    [make_operator("a"), make_operator("b")], 0.0
+                )
+
+        stats = get_candidate_stats(clear=True)[0]["selected_timeline"]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(
+            stats["final_selector"], "empirical_guarded_interference"
+        )
+        self.assertTrue(
+            stats["empirical"]["selector_guard_activated"]
+        )
+        self.assertLess(
+            stats["empirical"]["selector_baseline_utility"], 0.0
+        )
+
+    def test_empirical_guard_preserves_positive_janus_choice(self):
+        clear_candidate_stats()
+        cache = {
+            "utility_weights": {
+                "round_penalty": 0.5,
+                "operator_penalty": 0.1,
+            },
+            "pairs": {
+                "a|b": {
+                    "measured_pair_speedup": 1.5,
+                    "makespan_dilation": 1.0,
+                    "mean_slowdown": 1.0,
+                    "max_slowdown": 1.0,
+                },
+                "a|c": {
+                    "measured_pair_speedup": 2.0,
+                    "makespan_dilation": 1.0,
+                    "mean_slowdown": 1.0,
+                    "max_slowdown": 1.0,
+                },
+                "b|c": {
+                    "measured_pair_speedup": 2.0,
+                    "makespan_dilation": 1.0,
+                    "mean_slowdown": 1.0,
+                    "max_slowdown": 1.0,
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairs.json"
+            path.write_text(json.dumps(cache), encoding="utf-8")
+            with mock.patch.dict(os.environ, {
+                    "OPARA_TD_FINAL_SELECTOR": (
+                        "empirical_guarded_interference"
+                    ),
+                    "OPARA_PAIR_PROFILE_PATH": str(path)}):
+                scheduler = Scheduler(
+                    ResourceModel(1, SM_SPECS, time_domain=True),
+                    alpha=0.0,
+                    selection_mode="max_occupancy",
+                    time_domain=True,
+                )
+                selected = scheduler.schedule([
+                    make_operator("a"),
+                    make_operator("b"),
+                    make_operator("c"),
+                ], 0.0)
+
+        stats = get_candidate_stats(clear=True)[0]["selected_timeline"]
+        self.assertEqual(
+            [operator.name for operator in selected], ["a", "b"]
+        )
+        self.assertFalse(
+            stats["empirical"]["selector_guard_activated"]
+        )
+        self.assertGreater(
+            stats["empirical"]["selector_baseline_utility"], 0.0
+        )
+
     def test_finalist_diagnostics_are_opt_in(self):
         clear_candidate_stats()
         operators = [make_operator("a"), make_operator("b")]

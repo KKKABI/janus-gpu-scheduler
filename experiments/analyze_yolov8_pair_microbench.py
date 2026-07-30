@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate repeated YOLOv8 operator-pair measurements into a cache/report."""
+"""Aggregate repeated operator-pair measurements into a cache and report."""
 
 from __future__ import annotations
 
@@ -193,13 +193,14 @@ def aggregate_pair(key, repeats, diagnostic, operator_profiles, weights):
 
 
 def render_report(aggregate, correlations, weights):
+    model = aggregate["model"]
     pairs = aggregate["pairs"]
     concurrent = sum(
         pair["empirical"]["decision"] == "concurrent"
         for pair in pairs.values()
     )
     lines = [
-        "# YOLOv8 算子对实测干扰分析",
+        f"# {model} 算子对实测干扰分析",
         "",
         f"- 唯一算子对：{len(pairs)} 组；每组独立重复 5 次。",
         f"- 建议并发：{concurrent} 组；建议串行：{len(pairs) - concurrent} 组。",
@@ -221,8 +222,8 @@ def render_report(aggregate, correlations, weights):
         )
     lines.extend([
         "",
-        "现有 NCU 风险和 TD 预测 speedup 均不能可靠排序真实干扰，"
-        "因此不继续在这两个代理上调常数权重。",
+        "相关系数用于判断现有 NCU 风险和 TD 预测 speedup 能否可靠排序真实干扰；"
+        "若相关性弱，就不应只靠调整这两个代理指标的权重。",
         "",
         "## 逐对结果（5 次中位数）",
         "",
@@ -250,8 +251,9 @@ def render_report(aggregate, correlations, weights):
         "## 结论",
         "",
         "1. 整组完成时间膨胀与单个短算子的 slowdown 必须分别约束。",
-        "2. 所有实测组合仍有吞吐收益，但部分组合以 2–8 倍单算子 slowdown 换取约 1%–4% 的收益，不值得并发。",
-        "3. 下一版选择器应优先读取实测共运行缓存；未覆盖候选保守回退到 TD 排序，而不是用算子名称猜资源类型。",
+        "2. 即使组合仍有吞吐收益，也可能以很高的单算子 slowdown 换取很小收益，不值得并发。",
+        "3. 选择器应优先读取实测共运行缓存；未覆盖候选保守回退到 TD 排序，"
+        "而不是用算子名称猜资源类型。",
         "",
     ])
     return "\n".join(lines)
@@ -267,11 +269,32 @@ def main() -> int:
 
     grouped = defaultdict(list)
     source_files = []
+    metadata = []
     for path in result_paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
         source_files.append(str(path.resolve()))
+        metadata.append({
+            "model": payload["model"],
+            "model_class": payload["model_class"],
+            "input_shapes": payload.get("input_shapes"),
+            "runtime": payload.get("runtime", {}),
+        })
         for pair in payload["pairs"]:
             grouped[canonical_pair(pair["a"], pair["b"])].append(pair)
+    model_values = {item["model"] for item in metadata}
+    class_values = {item["model_class"] for item in metadata}
+    shape_values = {
+        json.dumps(item["input_shapes"], sort_keys=True)
+        for item in metadata
+    }
+    if len(model_values) != 1 or len(class_values) != 1 or len(shape_values) != 1:
+        raise RuntimeError("result files do not describe one consistent model/input")
+    model = next(iter(model_values))
+    model_class = next(iter(class_values))
+    input_shapes = metadata[0]["input_shapes"] or []
+    input_shape = input_shapes[0] if input_shapes else None
+    gpu_rows = metadata[0]["runtime"].get("gpu", {}).get("rows", [])
+    device_scope = gpu_rows[0].get("name") if gpu_rows else None
     if any(len(repeats) != 5 for repeats in grouped.values()):
         counts = {"|".join(key): len(value) for key, value in grouped.items()}
         raise RuntimeError(f"expected five repeats for every pair: {counts}")
@@ -293,8 +316,10 @@ def main() -> int:
     }
     aggregate = {
         "schema_version": 1,
-        "model": "YOLOv8x",
-        "model_class": "DetectionModel",
+        "model": model,
+        "model_class": model_class,
+        "input_shape": input_shape,
+        "device_scope": device_scope,
         "pair_count": len(pairs),
         "repeat_count_per_pair": 5,
         "weights": weights,
@@ -328,10 +353,10 @@ def main() -> int:
 
     cache = {
         "schema_version": 1,
-        "model": "YOLOv8x",
-        "model_class": "DetectionModel",
-        "device_scope": "NVIDIA RTX A5000",
-        "input_shape": [1, 3, 320, 320],
+        "model": model,
+        "model_class": model_class,
+        "device_scope": device_scope,
+        "input_shape": input_shape,
         "utility_weights": weights,
         "pair_count": len(pairs),
         "pairs": {
@@ -361,7 +386,8 @@ def main() -> int:
     (args.output_dir / "aggregate.json").write_text(
         json.dumps(aggregate, indent=2, sort_keys=True), encoding="utf-8"
     )
-    (args.output_dir / "DetectionModel.pair.json").write_text(
+    cache_path = args.output_dir / f"{model_class}.pair.json"
+    cache_path.write_text(
         json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8"
     )
     (args.output_dir / "analysis_report.md").write_text(
@@ -369,6 +395,8 @@ def main() -> int:
     )
     print(json.dumps({
         "pair_count": len(pairs),
+        "model": model,
+        "cache": str(cache_path.resolve()),
         "output_dir": str(args.output_dir.resolve()),
         "correlations": correlations,
     }, indent=2))

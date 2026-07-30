@@ -186,6 +186,14 @@
       "role": "proposed_v3"
     },
     {
+      "label": "TD+EmpiricalGuardDRT",
+      "simulator": "td",
+      "score": "drt_no_alpha",
+      "alpha": null,
+      "final_selector": "empirical_guarded_interference",
+      "role": "proposed_v4"
+    },
+    {
       "label": "TD+RiskAdjustedDRT-p0.25",
       "simulator": "td",
       "score": "drt_no_alpha",

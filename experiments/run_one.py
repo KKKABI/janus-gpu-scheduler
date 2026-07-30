@@ -185,6 +185,27 @@ def main() -> int:
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
         params = variant_parameters(task, config)
         params["max_ready"] = args.max_ready
+        if params["final_selector"] == "empirical_interference":
+            pair_profile_value = os.environ.get("OPARA_PAIR_PROFILE_PATH")
+            if not pair_profile_value:
+                raise RuntimeError(
+                    "TD+EmpiricalDRT requires OPARA_PAIR_PROFILE_PATH"
+                )
+            pair_profile_path = Path(pair_profile_value).resolve()
+            if not pair_profile_path.is_file():
+                raise RuntimeError(
+                    f"pair profile is missing: {pair_profile_path}"
+                )
+            params["empirical_pair_profile_path"] = str(pair_profile_path)
+            params["empirical_pair_profile_sha256"] = sha256_file(
+                pair_profile_path
+            )
+            params["empirical_round_penalty_override"] = os.environ.get(
+                "OPARA_EMPIRICAL_ROUND_PENALTY"
+            )
+            params["empirical_operator_penalty_override"] = os.environ.get(
+                "OPARA_EMPIRICAL_OPERATOR_PENALTY"
+            )
         os.environ["OPARA_TD_FINAL_SELECTOR"] = params["final_selector"]
         if params["timeline_speedup_guard"] is not None:
             os.environ["OPARA_TD_SPEEDUP_GUARD"] = str(

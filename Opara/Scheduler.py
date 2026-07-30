@@ -3,6 +3,7 @@ import copy
 import json
 import math
 import os
+import statistics
 from itertools import combinations
 
 
@@ -914,11 +915,11 @@ class Scheduler:
         )
         if self.final_selector not in {
                 "strategy", "timeline", "guarded_interference",
-                "risk_adjusted_interference"}:
+                "risk_adjusted_interference", "empirical_interference"}:
             raise ValueError(
                 "OPARA_TD_FINAL_SELECTOR must be one of "
                 "strategy, timeline, guarded_interference, "
-                "risk_adjusted_interference"
+                "risk_adjusted_interference, empirical_interference"
             )
         self.timeline_speedup_guard = float(os.environ.get(
             "OPARA_TD_SPEEDUP_GUARD", "0.9"
@@ -935,6 +936,42 @@ class Scheduler:
         ))
         if self.interference_risk_penalty < 0.0:
             raise ValueError("OPARA_TD_RISK_PENALTY must be >= 0")
+        self.empirical_pair_profile_path = os.environ.get(
+            "OPARA_PAIR_PROFILE_PATH"
+        )
+        self.empirical_pair_profiles = {}
+        empirical_defaults = {
+            "round_penalty": 0.5,
+            "operator_penalty": 0.1,
+        }
+        if self.empirical_pair_profile_path:
+            with open(
+                    self.empirical_pair_profile_path,
+                    "r", encoding="utf-8") as pair_profile_file:
+                pair_profile = json.load(pair_profile_file)
+            self.empirical_pair_profiles = pair_profile.get("pairs", {})
+            empirical_defaults.update(
+                pair_profile.get("utility_weights", {})
+            )
+        if (
+                self.final_selector == "empirical_interference"
+                and not self.empirical_pair_profiles):
+            raise ValueError(
+                "empirical_interference requires a non-empty "
+                "OPARA_PAIR_PROFILE_PATH"
+            )
+        self.empirical_round_penalty = float(os.environ.get(
+            "OPARA_EMPIRICAL_ROUND_PENALTY",
+            empirical_defaults["round_penalty"],
+        ))
+        self.empirical_operator_penalty = float(os.environ.get(
+            "OPARA_EMPIRICAL_OPERATOR_PENALTY",
+            empirical_defaults["operator_penalty"],
+        ))
+        if (
+                self.empirical_round_penalty < 0.0
+                or self.empirical_operator_penalty < 0.0):
+            raise ValueError("empirical penalties must be non-negative")
         self._interference_profile_cache = {}
         self._schedule_call = 0
 
@@ -1156,6 +1193,113 @@ class Scheduler:
             "pair_count": len(pair_conflicts),
         }
 
+    @staticmethod
+    def _empirical_pair_key(left_name, right_name):
+        return "|".join(sorted((left_name, right_name)))
+
+    def _combo_empirical_metrics(self, combo):
+        """Estimate a candidate from measured solo/co-run pair profiles."""
+        if len(combo) <= 1:
+            return {
+                "fully_covered": True,
+                "coverage": 1.0,
+                "profiled_pair_count": 0,
+                "pair_count": 0,
+                "estimated_speedup": 1.0,
+                "estimated_makespan_dilation": 1.0,
+                "estimated_mean_slowdown": 1.0,
+                "estimated_max_slowdown": 1.0,
+                "normalized_time_saved": 0.0,
+                "utility": 0.0,
+            }
+
+        pairs = list(combinations(combo, 2))
+        entries = []
+        missing_pairs = []
+        for left, right in pairs:
+            key = self._empirical_pair_key(left.name, right.name)
+            entry = self.empirical_pair_profiles.get(key)
+            if entry is None:
+                missing_pairs.append([left.name, right.name])
+            else:
+                entries.append(entry)
+        coverage = len(entries) / len(pairs)
+        if missing_pairs:
+            return {
+                "fully_covered": False,
+                "coverage": coverage,
+                "profiled_pair_count": len(entries),
+                "pair_count": len(pairs),
+                "missing_pairs": missing_pairs,
+                "utility": None,
+            }
+
+        if len(combo) == 2:
+            entry = entries[0]
+            speedup = float(entry["measured_pair_speedup"])
+            dilation = float(entry["makespan_dilation"])
+            mean_slowdown = float(entry["mean_slowdown"])
+            max_slowdown = float(entry["max_slowdown"])
+        else:
+            solo_samples = {operator.name: [] for operator in combo}
+            slowdown_overheads = {operator.name: [] for operator in combo}
+            for entry in entries:
+                for operator_name, operator_metrics in entry[
+                        "operator_metrics"].items():
+                    if operator_name not in solo_samples:
+                        continue
+                    solo_samples[operator_name].append(float(
+                        operator_metrics["solo_ms"]["median"]
+                    ))
+                    slowdown_overheads[operator_name].append(max(
+                        0.0,
+                        float(operator_metrics["slowdown"]["median"]) - 1.0,
+                    ))
+            solo = {
+                name: statistics.median(values)
+                for name, values in solo_samples.items()
+            }
+            slowdowns = {
+                name: 1.0 + sum(slowdown_overheads[name])
+                for name in solo
+            }
+            serial_makespan = sum(solo.values())
+            concurrent_makespan = max(
+                solo[name] * slowdowns[name] for name in solo
+            )
+            speedup = (
+                serial_makespan / concurrent_makespan
+                if concurrent_makespan > 0.0 else 1.0
+            )
+            dilation = (
+                concurrent_makespan / max(solo.values())
+                if solo and max(solo.values()) > 0.0 else 1.0
+            )
+            mean_slowdown = statistics.fmean(slowdowns.values())
+            max_slowdown = max(slowdowns.values())
+
+        normalized_time_saved = max(0.0, 1.0 - 1.0 / speedup)
+        utility = (
+            normalized_time_saved
+            - self.empirical_round_penalty * max(0.0, dilation - 1.0)
+            - self.empirical_operator_penalty
+            * max(0.0, max_slowdown - 1.0)
+        )
+        return {
+            "fully_covered": True,
+            "coverage": 1.0,
+            "profiled_pair_count": len(entries),
+            "pair_count": len(pairs),
+            "estimated_speedup": speedup,
+            "estimated_makespan_dilation": dilation,
+            "estimated_mean_slowdown": mean_slowdown,
+            "estimated_max_slowdown": max_slowdown,
+            "normalized_time_saved": normalized_time_saved,
+            "round_penalty_weight": self.empirical_round_penalty,
+            "operator_penalty_weight": self.empirical_operator_penalty,
+            "utility": utility,
+        }
+
     def _record_candidate_stats(
             self, ready_names, ready_used_names, raw_theoretical_count,
             theoretical_count, combo_scores, top_candidates, selected_combo,
@@ -1195,6 +1339,7 @@ class Scheduler:
                     'risk_adjusted_interference': (
                         'risk_adjusted_time_saved'
                     ),
+                    'empirical_interference': 'empirical_corun_utility',
                 }[self.final_selector] if self.time_domain
                 else 'strategy_score'
             ),
@@ -1213,12 +1358,31 @@ class Scheduler:
                 and self.final_selector == 'risk_adjusted_interference'
                 else None
             ),
+            'empirical_pair_profile_path': (
+                self.empirical_pair_profile_path
+                if self.time_domain
+                and self.final_selector == 'empirical_interference'
+                else None
+            ),
+            'empirical_round_penalty': (
+                self.empirical_round_penalty
+                if self.time_domain
+                and self.final_selector == 'empirical_interference'
+                else None
+            ),
+            'empirical_operator_penalty': (
+                self.empirical_operator_penalty
+                if self.time_domain
+                and self.final_selector == 'empirical_interference'
+                else None
+            ),
             'timeline_shortlist_limit': (
                 (
                     self.interference_shortlist_size
                     if self.final_selector in {
                         'guarded_interference',
                         'risk_adjusted_interference',
+                        'empirical_interference',
                     }
                     else self.timeline_shortlist_size
                 ) if self.time_domain else 0
@@ -1267,6 +1431,48 @@ class Scheduler:
             record['interference_risk_mean'] = sum(risks) / len(risks)
         if selected_timeline is not None:
             record['selected_timeline'] = copy.deepcopy(selected_timeline)
+        if os.environ.get('OPARA_RECORD_FINALISTS') == '1':
+            timeline_keys = (
+                'feasible',
+                'makespan',
+                'sequential_duration',
+                'predicted_speedup',
+                'normalized_time_saved',
+                'average_utilization',
+                'overlap_duration',
+                'stage1_rank',
+                'stage1_shortlist_size',
+                'interference',
+                'selector_guard_activated',
+                'selector_risk_penalty',
+                'selector_risk_adjusted_utility',
+                'empirical',
+            )
+            finalist_timelines = []
+            for combo, initial_utilization in combo_scores:
+                metrics = combo_metrics.get(id(combo))
+                if metrics is None:
+                    continue
+                finalist_timelines.append({
+                    'operators': [operator.name for operator in combo],
+                    'size': len(combo),
+                    'initial_utilization': float(initial_utilization),
+                    'operator_profiles': [
+                        {
+                            'name': operator.name,
+                            **copy.deepcopy(
+                                self._operator_interference_profile(operator)
+                            ),
+                        }
+                        for operator in combo
+                    ],
+                    'timeline': {
+                        key: copy.deepcopy(metrics[key])
+                        for key in timeline_keys
+                        if key in metrics
+                    },
+                })
+            record['finalist_timelines'] = finalist_timelines
         _CANDIDATE_STATS.append(record)
 
     def _select_static_interference(
@@ -1450,6 +1656,7 @@ class Scheduler:
                     if self.final_selector in {
                         "guarded_interference",
                         "risk_adjusted_interference",
+                        "empirical_interference",
                     }
                     else self.timeline_shortlist_size
                 )
@@ -1468,6 +1675,7 @@ class Scheduler:
                     self.final_selector in {
                         "guarded_interference",
                         "risk_adjusted_interference",
+                        "empirical_interference",
                     }
                     and len(finalists) < shortlist_limit
                 ):
@@ -1511,6 +1719,10 @@ class Scheduler:
                 metrics["interference"] = self._combo_interference_metrics(
                     combo
                 )
+                if self.final_selector == "empirical_interference":
+                    metrics["empirical"] = self._combo_empirical_metrics(
+                        combo
+                    )
                 combo_metrics[id(combo)] = metrics
                 if not metrics.get("feasible"):
                     continue
@@ -1567,6 +1779,33 @@ class Scheduler:
                         combo_metrics[id(item[3])]["stage1_rank"],
                     ),
                 )[3]
+            elif self.final_selector == "empirical_interference":
+                fully_profiled = all(
+                    combo_metrics[id(item[3])]["empirical"][
+                        "fully_covered"
+                    ]
+                    for item in timeline_ranked
+                )
+                for item in timeline_ranked:
+                    combo_metrics[id(item[3])]["empirical"][
+                        "selector_fallback"
+                    ] = not fully_profiled
+                selected_combo = (
+                    max(
+                        timeline_ranked,
+                        key=lambda item: (
+                            combo_metrics[id(item[3])]["empirical"][
+                                "utility"
+                            ],
+                            combo_metrics[id(item[3])]["empirical"].get(
+                                "estimated_speedup", 0.0
+                            ),
+                            item[1],
+                            -combo_metrics[id(item[3])]["stage1_rank"],
+                        ),
+                    )[3]
+                    if fully_profiled else best_item[3]
+                )
             else:
                 best_risk = combo_metrics[
                     id(best_item[3])

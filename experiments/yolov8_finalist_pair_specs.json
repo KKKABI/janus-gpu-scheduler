@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "description": "Previously unmeasured two-operator finalists observed in instrumented YOLOv8 scheduler runs.",
+  "pairs": [
+    {
+      "id": "arange_arange2",
+      "a": "arange",
+      "b": "arange_2",
+      "predicted_risk": 0.28966444376703065,
+      "predicted_speedup": 1.0668962124938515,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+RiskAdjustedDRT",
+      "source_call": 1
+    },
+    {
+      "id": "convolution_arange",
+      "a": "convolution",
+      "b": "arange",
+      "predicted_risk": 0.2656201916743462,
+      "predicted_speedup": 1.0171649275923353,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+RiskAdjustedDRT",
+      "source_call": 1
+    },
+    {
+      "id": "silu76_silu87",
+      "a": "silu__76",
+      "b": "silu__87",
+      "predicted_risk": 0.19308845364205957,
+      "predicted_speedup": 1.0,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+RiskAdjustedDRT",
+      "source_call": 359
+    },
+    {
+      "id": "arange_add19",
+      "a": "arange",
+      "b": "add_19",
+      "predicted_risk": 0.1366770805922827,
+      "predicted_speedup": 1.0414006577674597,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+Janus-no-alpha",
+      "source_call": 2
+    },
+    {
+      "id": "arange_add21",
+      "a": "arange",
+      "b": "add_21",
+      "predicted_risk": 0.13704881952487408,
+      "predicted_speedup": 1.042060582674127,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+Janus-no-alpha",
+      "source_call": 2
+    },
+    {
+      "id": "mul1_silu",
+      "a": "mul_1",
+      "b": "silu_",
+      "predicted_risk": 0.09190013973783334,
+      "predicted_speedup": 1.340010272213662,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+Janus-no-alpha",
+      "source_call": 4
+    },
+    {
+      "id": "convolution94_batchnorm85",
+      "a": "convolution_94",
+      "b": "cudnn_batch_norm_85",
+      "predicted_risk": 0.004310132834252657,
+      "predicted_speedup": 1.0,
+      "scheduler_decision": "candidate",
+      "source_variant": "TD+RiskAdjustedDRT",
+      "source_call": 317
+    },
+    {
+      "id": "add19_batchnorm",
+      "a": "add_19",
+      "b": "cudnn_batch_norm",
+      "predicted_risk": 0.18276653383200053,
+      "predicted_speedup": 1.0,
+      "scheduler_decision": "constituent_pair",
+      "source_variant": "TD+Janus-no-alpha",
+      "source_call": 2
+    },
+    {
+      "id": "add21_batchnorm",
+      "a": "add_21",
+      "b": "cudnn_batch_norm",
+      "predicted_risk": 0.18318949239895516,
+      "predicted_speedup": 1.0,
+      "scheduler_decision": "constituent_pair",
+      "source_variant": "TD+Janus-no-alpha",
+      "source_call": 2
+    },
+    {
+      "id": "convolution_add19",
+      "a": "convolution",
+      "b": "add_19",
+      "predicted_risk": 0.28691243806781674,
+      "predicted_speedup": 1.0880676585001134,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 2
+    },
+    {
+      "id": "convolution_add21",
+      "a": "convolution",
+      "b": "add_21",
+      "predicted_risk": 0.28758214514223773,
+      "predicted_speedup": 1.088169823757605,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 2
+    },
+    {
+      "id": "add19_mul3",
+      "a": "add_19",
+      "b": "mul_3",
+      "predicted_risk": 0.08626459505703278,
+      "predicted_speedup": 1.1131454606817417,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 3
+    },
+    {
+      "id": "batchnorm_mul3",
+      "a": "cudnn_batch_norm",
+      "b": "mul_3",
+      "predicted_risk": 0.015714530175963665,
+      "predicted_speedup": 1.096619411123228,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 3
+    },
+    {
+      "id": "mul1_to_copy3",
+      "a": "mul_1",
+      "b": "_to_copy_3",
+      "predicted_risk": 0.020858263936840826,
+      "predicted_speedup": 1.0,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 4
+    },
+    {
+      "id": "convolution76_batchnorm87",
+      "a": "convolution_76",
+      "b": "cudnn_batch_norm_87",
+      "predicted_risk": 0.37231370956026744,
+      "predicted_speedup": 1.1167410240067983,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 358
+    },
+    {
+      "id": "convolution_mul1",
+      "a": "convolution",
+      "b": "mul_1",
+      "predicted_risk": 0.26149230064216356,
+      "predicted_speedup": 1.0173406808283707,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 3
+    },
+    {
+      "id": "convolution_mul3",
+      "a": "convolution",
+      "b": "mul_3",
+      "predicted_risk": 0.2807582773562424,
+      "predicted_speedup": 1.1126963785078732,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 3
+    },
+    {
+      "id": "mul1_batchnorm",
+      "a": "mul_1",
+      "b": "cudnn_batch_norm",
+      "predicted_risk": 0.02182431013253242,
+      "predicted_speedup": 1.6691842900302114,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 4
+    },
+    {
+      "id": "batchnorm_to_copy3",
+      "a": "cudnn_batch_norm",
+      "b": "_to_copy_3",
+      "predicted_risk": 0.005919823654476,
+      "predicted_speedup": 1.090293453724605,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 4
+    },
+    {
+      "id": "to_copy3_to_copy1",
+      "a": "_to_copy_3",
+      "b": "_to_copy_1",
+      "predicted_risk": 0.03214205784874042,
+      "predicted_speedup": 1.9195402298850575,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 5
+    },
+    {
+      "id": "silu88_convolution99",
+      "a": "silu__88",
+      "b": "convolution_99",
+      "predicted_risk": 0.2957794225314669,
+      "predicted_speedup": 1.1909456479439615,
+      "scheduler_decision": "empirical_bootstrap",
+      "source_variant": "TD+EmpiricalDRT",
+      "source_call": 366
+    }
+  ]
+}

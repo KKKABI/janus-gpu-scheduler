@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "model": "GoogLeNet",
+  "variant": "TD+Janus",
+  "replays": 5,
+  "git_head": "3b2880ad5ca4b78d0385c9dd014ac2f4ab420648",
+  "profile_path": "/public_0/LYX/janus_q3_profile_20260807/Opara/profile_result/GoogLeNet_torch.Size([1, 3, 224, 224]).pt.trace.json",
+  "profile_sha256": "0d29cfcd359efbf8d0630d9ef8171b0f6cd383fbac8ce27d7c6a1b18b3a1ae14",
+  "effective_parameters": {
+    "selection_mode": "legacy_balance",
+    "time_domain": true,
+    "internal_alpha": 0.9,
+    "final_selector": "timeline",
+    "timeline_speedup_guard": 0.9,
+    "interference_risk_trigger": 0.1,
+    "interference_risk_penalty": 0.5,
+    "simulator_semantics": "shared_candidate_timeline_v1",
+    "candidate_score_kind": "initial_occupancy_then_predicted_speedup",
+    "td_timeline_shortlist": 8,
+    "td_interference_shortlist": 12,
+    "td_max_events": 100000,
+    "max_ready": 15
+  },
+  "scheduler_call_count": 86,
+  "call13_assertion": {
+    "passed": true,
+    "ready": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "selected": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "enumerated": 7,
+    "feasible": 7
+  },
+  "call13": {
+    "call": 13,
+    "current_time": 0.0,
+    "time_domain": true,
+    "candidate_score_kind": "initial_occupancy",
+    "final_score_kind": "predicted_speedup",
+    "final_selector": "timeline",
+    "timeline_speedup_guard": 0.9,
+    "interference_risk_trigger": 0.1,
+    "interference_risk_penalty": null,
+    "empirical_pair_profile_path": null,
+    "empirical_round_penalty": null,
+    "empirical_operator_penalty": null,
+    "timeline_shortlist_limit": 8,
+    "selection_mode": "legacy_balance",
+    "alpha": 0.9,
+    "ready_count": 3,
+    "ready_used_count": 3,
+    "ready_ops": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "ready_used_ops": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "resource_ready_count": 3,
+    "resource_ready_used_count": 3,
+    "passthrough_count": 0,
+    "passthrough_ops": [],
+    "raw_theoretical_count": 7,
+    "theoretical_count": 7,
+    "enumerated_count": 7,
+    "feasible_count": 7,
+    "alpha_candidate_count": 4,
+    "scoring_candidate_count": 4,
+    "occ_max": 1.0,
+    "candidate_score_max": 1.0,
+    "selected_resource": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "selected_resource_size": 3,
+    "selected_passthrough": [],
+    "selected": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "selected_size": 3,
+    "timeline_candidate_count": 4,
+    "timeline_speedup_min": 1.0,
+    "timeline_speedup_max": 1.357142857142857,
+    "timeline_speedup_mean": 1.1785714285714286,
+    "interference_candidate_count": 4,
+    "interference_risk_min": 0.0,
+    "interference_risk_max": 0.1357137044270833,
+    "interference_risk_mean": 0.07779058244009843,
+    "selected_timeline": {
+      "feasible": true,
+      "failure_reason": null,
+      "makespan": 0.014,
+      "average_utilization": 0.855282738095238,
+      "initial_utilization": 1.0,
+      "peak_utilization": 1.0,
+      "overlap_duration": 0.003,
+      "overlap_fraction": 0.21428571428571427,
+      "max_concurrent_operators": 3,
+      "event_count": 6,
+      "launch_rounds": 4,
+      "initial_resident_blocks": {
+        "x_11": 207,
+        "x_13": 98,
+        "x_17": 128
+      },
+      "operator_completion_times": {
+        "x_11": 0.014,
+        "x_13": 0.002,
+        "x_17": 0.003
+      },
+      "stage1_rank": 4,
+      "stage1_shortlist_size": 4,
+      "interference": {
+        "risk": 0.1260655393840247,
+        "pair_conflict": 0.044875904238446306,
+        "capacity_overload": 0.3155080213903743,
+        "duration_tail": 0.5400617248673217,
+        "ncu_coverage": 0.6666666666666666,
+        "pair_count": 3
+      },
+      "serial_makespan": 0.019,
+      "predicted_speedup": 1.357142857142857,
+      "normalized_time_saved": 0.26315789473684204,
+      "final_selector": "timeline",
+      "selector_best_speedup": 1.357142857142857,
+      "selector_best_speedup_risk": 0.1260655393840247,
+      "selector_selected_speedup_loss": 0.0,
+      "selector_eligible_count": 4
+    }
+  },
+  "correctness": {
+    "ok": true,
+    "tensor_count": 1,
+    "max_absolute_difference": 0.0
+  }
+}

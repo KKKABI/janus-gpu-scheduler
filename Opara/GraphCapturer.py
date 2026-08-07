@@ -8,7 +8,9 @@ from torch._functorch.partitioners import draw_graph
 from collections import defaultdict,deque
 from torch.cuda.streams import Stream, Event
 from Opara import priority_streams
+import json
 import os
+from pathlib import Path
 import sys
 path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
@@ -42,7 +44,17 @@ class Scheduler(Interpreter):
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
         
-        self.env[n] = getattr(self, n.op)(n.target, args, kwargs)
+        q3_capture_phase = (
+            bool(os.environ.get("OPARA_Q3_PROFILE_MAP"))
+            and getattr(self, "_q3_phase", None) == "graph_capture"
+        )
+        if q3_capture_phase:
+            torch.cuda.nvtx.range_push(f"FX::GRAPH_CAPTURE::{n.name}")
+        try:
+            self.env[n] = getattr(self, n.op)(n.target, args, kwargs)
+        finally:
+            if q3_capture_phase:
+                torch.cuda.nvtx.range_pop()
 
         # if n.need_record == True:        
         #     n.event.record(n.stream)
@@ -182,12 +194,49 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
                 if input_node.event not in node.event_to_wait:
                     node.event_to_wait.append(input_node.event)
 
+    q3_profile_map = os.environ.get("OPARA_Q3_PROFILE_MAP")
+    if q3_profile_map:
+        node_rows = []
+        for node in graph.nodes:
+            stream_ptr = None
+            stream_index = None
+            if node.stream is not None:
+                stream_ptr = int(node.stream.cuda_stream)
+                stream_index = next(
+                    (
+                        index for index, stream in enumerate(all_streams)
+                        if int(stream.cuda_stream) == stream_ptr
+                    ),
+                    None,
+                )
+            kernels = []
+            for info in getattr(node, "info", []) or []:
+                info_args = info.get("args", {})
+                kernels.append({
+                    "name": str(info.get("name", "")),
+                    "duration_us": float(info.get("dur", 0.0)),
+                    "grid": list(info_args.get("grid", ())),
+                    "block": list(info_args.get("block", ())),
+                })
+            node_rows.append({
+                "name": node.name,
+                "op": node.op,
+                "stream_index": stream_index,
+                "stream_ptr": stream_ptr,
+                "wait_event_count": len(node.event_to_wait),
+                "kernels": kernels,
+            })
+        Path(q3_profile_map).write_text(
+            json.dumps({"nodes": node_rows}, indent=2), encoding="utf-8"
+        )
+
     
    
     all_events = [torch.cuda.Event() for _ in range(len(all_streams))]
     first_stream = all_streams[0]
     first_event = all_events[0]
     interpreter = Scheduler(fx_module)
+    interpreter._q3_phase = "warmup"
 
     # with torch.autocast(device_type='cuda', dtype=torch.float16):
 
@@ -198,6 +247,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
         # capture
         g = torch.cuda.CUDAGraph()
 
+        interpreter._q3_phase = "graph_capture"
         with torch.cuda.graph(g, stream=first_stream):
             first_event.record(first_stream)
 
@@ -216,6 +266,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
                     first_stream.wait_event(event)
 
         torch.cuda.synchronize()
+        interpreter._q3_phase = "idle"
 
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
@@ -233,4 +284,7 @@ def capturer(inputs, model, copy_outputs: bool = False, alpha=0.9, selection_mod
         else:
             return static_outputs
 
+    run._opara_graph = g
+    run._opara_graph_module = fx_module
+    run._opara_streams = all_streams
     return run

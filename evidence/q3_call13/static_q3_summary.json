@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "model": "GoogLeNet",
+  "variant": "Baseline",
+  "replays": 5,
+  "git_head": "3b2880ad5ca4b78d0385c9dd014ac2f4ab420648",
+  "profile_path": "/public_0/LYX/janus_q3_profile_20260807/Opara/profile_result/GoogLeNet_torch.Size([1, 3, 224, 224]).pt.trace.json",
+  "profile_sha256": "0d29cfcd359efbf8d0630d9ef8171b0f6cd383fbac8ce27d7c6a1b18b3a1ae14",
+  "effective_parameters": {
+    "selection_mode": "legacy_balance",
+    "time_domain": false,
+    "internal_alpha": 0.9,
+    "final_selector": "timeline",
+    "timeline_speedup_guard": null,
+    "interference_risk_trigger": null,
+    "interference_risk_penalty": null,
+    "simulator_semantics": "all_blocks_co_resident",
+    "candidate_score_kind": "initial_occupancy",
+    "td_timeline_shortlist": null,
+    "td_interference_shortlist": null,
+    "td_max_events": null,
+    "max_ready": 15
+  },
+  "scheduler_call_count": 133,
+  "call13_assertion": {
+    "passed": true,
+    "ready": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "selected": [
+      "x_13",
+      "x_17"
+    ],
+    "enumerated": 7,
+    "feasible": 3
+  },
+  "call13": {
+    "call": 13,
+    "current_time": 0.0,
+    "time_domain": false,
+    "candidate_score_kind": "initial_occupancy",
+    "final_score_kind": "strategy_score",
+    "final_selector": "strategy",
+    "timeline_speedup_guard": null,
+    "interference_risk_trigger": null,
+    "interference_risk_penalty": null,
+    "empirical_pair_profile_path": null,
+    "empirical_round_penalty": null,
+    "empirical_operator_penalty": null,
+    "timeline_shortlist_limit": 0,
+    "selection_mode": "legacy_balance",
+    "alpha": 0.9,
+    "ready_count": 3,
+    "ready_used_count": 3,
+    "ready_ops": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "ready_used_ops": [
+      "x_11",
+      "x_13",
+      "x_17"
+    ],
+    "resource_ready_count": 3,
+    "resource_ready_used_count": 3,
+    "passthrough_count": 0,
+    "passthrough_ops": [],
+    "raw_theoretical_count": 7,
+    "theoretical_count": 7,
+    "enumerated_count": 7,
+    "feasible_count": 3,
+    "alpha_candidate_count": 1,
+    "scoring_candidate_count": 1,
+    "occ_max": 0.46093750000000056,
+    "candidate_score_max": 0.46093750000000056,
+    "selected_resource": [
+      "x_13",
+      "x_17"
+    ],
+    "selected_resource_size": 2,
+    "selected_passthrough": [],
+    "selected": [
+      "x_13",
+      "x_17"
+    ],
+    "selected_size": 2
+  },
+  "correctness": {
+    "ok": true,
+    "tensor_count": 1,
+    "max_absolute_difference": 0.0
+  }
+}

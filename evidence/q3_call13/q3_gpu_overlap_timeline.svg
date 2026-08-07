@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820">
+<rect width="100%" height="100%" fill="#FFFFFF"/>
+<style>text{font-family:Arial,Segoe UI,sans-serif;fill:#17212B}.title{font-size:25px;font-weight:700}.panel{font-size:19px;font-weight:700}.label{font-size:16px}.tick{font-size:13px;fill:#4B5563}.note{font-size:14px;fill:#374151}</style>
+<text class="title" x="700" y="42" text-anchor="middle">GoogLeNet call 13: Nsight Systems kernel-level concurrency</text>
+<text class="note" x="700" y="68" text-anchor="middle">Exact replay kernel intervals; * denotes the operators selected together at call 13</text>
+<text class="panel" x="170" y="138">Static+Janus — replay 3 | selected overlap=6.943 us | strict triple=0.000 us</text>
+<rect x="170" y="158" width="1170" height="232" fill="#FAFAFA" stroke="#D1D5DB"/>
+<line x1="170.00" y1="158" x2="170.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="170.00" y="410" text-anchor="middle">0.0</text>
+<line x1="365.00" y1="158" x2="365.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="365.00" y="410" text-anchor="middle">8.4</text>
+<line x1="560.00" y1="158" x2="560.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="560.00" y="410" text-anchor="middle">16.7</text>
+<line x1="755.00" y1="158" x2="755.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="755.00" y="410" text-anchor="middle">25.1</text>
+<line x1="950.00" y1="158" x2="950.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="950.00" y="410" text-anchor="middle">33.4</text>
+<line x1="1145.00" y1="158" x2="1145.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="1145.00" y="410" text-anchor="middle">41.8</text>
+<line x1="1340.00" y1="158" x2="1340.00" y2="390" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="1340.00" y="410" text-anchor="middle">50.1</text>
+<rect x="178.96" y="158" width="162.04" height="232" fill="#9CA3AF" opacity="0.12"/>
+<text class="label" x="152" y="209" text-anchor="end">x_11</text>
+<rect x="1148.36" y="185.00" width="135.93" height="34" rx="3" fill="#2F6B9A" opacity="0.45" stroke="#6B7280" stroke-width="1"/>
+<text class="label" x="152" y="275" text-anchor="end">x_13 *</text>
+<rect x="170.00" y="251.00" width="171.01" height="34" rx="3" fill="#E58634" opacity="1.0" stroke="#17212B" stroke-width="2"/>
+<text class="label" x="152" y="341" text-anchor="end">x_17 *</text>
+<rect x="178.96" y="317.00" width="172.52" height="34" rx="3" fill="#4C9F70" opacity="1.0" stroke="#17212B" stroke-width="2"/>
+<text class="tick" x="755.0" y="433" text-anchor="middle">GPU time relative to first target kernel (microseconds)</text>
+<text class="panel" x="170" y="468">TD+Janus — replay 3 | selected overlap=6.560 us | strict triple=6.560 us</text>
+<rect x="170" y="488" width="1170" height="232" fill="#FAFAFA" stroke="#D1D5DB"/>
+<line x1="170.00" y1="488" x2="170.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="170.00" y="740" text-anchor="middle">0.0</text>
+<line x1="365.00" y1="488" x2="365.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="365.00" y="740" text-anchor="middle">8.4</text>
+<line x1="560.00" y1="488" x2="560.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="560.00" y="740" text-anchor="middle">16.7</text>
+<line x1="755.00" y1="488" x2="755.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="755.00" y="740" text-anchor="middle">25.1</text>
+<line x1="950.00" y1="488" x2="950.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="950.00" y="740" text-anchor="middle">33.4</text>
+<line x1="1145.00" y1="488" x2="1145.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="1145.00" y="740" text-anchor="middle">41.8</text>
+<line x1="1340.00" y1="488" x2="1340.00" y2="720" stroke="#D1D5DB" stroke-width="1"/>
+<text class="tick" x="1340.00" y="740" text-anchor="middle">50.1</text>
+<rect x="178.96" y="488" width="8.96" height="232" fill="#9CA3AF" opacity="0.12"/>
+<rect x="187.92" y="488" width="153.11" height="232" fill="#C72E29" opacity="0.17"/>
+<rect x="341.03" y="488" width="7.47" height="232" fill="#9CA3AF" opacity="0.12"/>
+<text class="label" x="152" y="539" text-anchor="end">x_11 *</text>
+<rect x="170.00" y="515.00" width="171.03" height="34" rx="3" fill="#2F6B9A" opacity="1.0" stroke="#17212B" stroke-width="2"/>
+<text class="label" x="152" y="605" text-anchor="end">x_13 *</text>
+<rect x="178.96" y="581.00" width="169.54" height="34" rx="3" fill="#E58634" opacity="1.0" stroke="#17212B" stroke-width="2"/>
+<text class="label" x="152" y="671" text-anchor="end">x_17 *</text>
+<rect x="187.92" y="647.00" width="204.64" height="34" rx="3" fill="#4C9F70" opacity="1.0" stroke="#17212B" stroke-width="2"/>
+<text class="tick" x="755.0" y="763" text-anchor="middle">GPU time relative to first target kernel (microseconds)</text>
+<rect x="220" y="776" width="22" height="14" fill="#2F6B9A" opacity="0.75"/>
+<text class="note" x="250" y="788">x_11</text>
+<rect x="410" y="776" width="22" height="14" fill="#E58634" opacity="0.75"/>
+<text class="note" x="440" y="788">x_13</text>
+<rect x="600" y="776" width="22" height="14" fill="#4C9F70" opacity="0.75"/>
+<text class="note" x="630" y="788">x_17</text>
+<rect x="790" y="776" width="22" height="14" fill="#9CA3AF" opacity="0.75"/>
+<text class="note" x="820" y="788">&gt;=2 target ops active</text>
+<rect x="1040" y="776" width="22" height="14" fill="#C72E29" opacity="0.75"/>
+<text class="note" x="1070" y="788">3 target ops active</text>
+</svg>

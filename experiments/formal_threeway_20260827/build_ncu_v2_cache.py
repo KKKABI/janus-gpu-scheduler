@@ -11,6 +11,15 @@ from pathlib import Path
 import re
 
 
+REQUIRED_METRICS = {
+    "mem_thru",
+    "dram_thru",
+    "l2_thru",
+    "comp_thru",
+    "dur_ns",
+}
+
+
 def number(value):
     text = str(value or "0").replace(",", "").strip()
     return float(text) if text else 0.0
@@ -37,6 +46,17 @@ def read_rows(path):
         if "Kernel Name" in line and "Metric Name" in line and "ID" in line
     )
     return csv.DictReader(lines[header:])
+
+
+def incomplete_launch_ids(kernels):
+    """Return launches that cannot enter a formal single-run NCU cache."""
+    return [
+        item["launch_id"]
+        for item in kernels
+        if not item["grid_size"]
+        or not item["block_size"]
+        or not REQUIRED_METRICS.issubset(item.get("metrics", {}))
+    ]
 
 
 def main():
@@ -84,11 +104,7 @@ def main():
             launch["metrics"]["mem_thru"] = number(value)
 
     kernels = sorted(launches.values(), key=lambda item: item["launch_id"])
-    incomplete = [
-        item["launch_id"] for item in kernels
-        if not item["grid_size"] or not item["block_size"]
-        or not {"dram_thru", "l2_thru", "comp_thru"}.issubset(item["metrics"])
-    ]
+    incomplete = incomplete_launch_ids(kernels)
     if incomplete:
         raise RuntimeError(
             f"{len(incomplete)} launches lack geometry/throughput metrics; first IDs={incomplete[:10]}"

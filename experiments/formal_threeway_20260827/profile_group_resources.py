@@ -148,7 +148,13 @@ def trace_fx(model: Any, inputs: tuple[Any, ...], backend: str) -> Any:
     return module.eval().cuda()
 
 
-def prepare_target_interpreter(module: Any, inputs: tuple[Any, ...], names: list[str]):
+def prepare_target_interpreter(
+    module: Any,
+    inputs: tuple[Any, ...],
+    names: list[str],
+    *,
+    synchronize: bool = True,
+):
     import torch
 
     nodes_by_name = {node.name: node for node in module.graph.nodes}
@@ -175,12 +181,27 @@ def prepare_target_interpreter(module: Any, inputs: tuple[Any, ...], names: list
 
     interpreter = torch.fx.Interpreter(module)
     interpreter.env = {}
-    interpreter.args_iter = iter(inputs)
+
+    # Bind *all* placeholders before walking the requested ancestor closure.
+    # FX Interpreter normally consumes placeholders through args_iter while it
+    # executes the full graph.  Here we deliberately execute only a closure;
+    # using args_iter would bind the first supplied tensor to a closure whose
+    # first required placeholder may actually be the graph's second input.
+    placeholders = [
+        node for node in module.graph.nodes if node.op == "placeholder"
+    ]
+    if len(placeholders) != len(inputs):
+        raise RuntimeError(
+            "FX placeholder/input arity differs: "
+            f"placeholders={len(placeholders)}, inputs={len(inputs)}"
+        )
+    interpreter.env.update(zip(placeholders, inputs))
     with torch.inference_mode():
         for node in module.graph.nodes:
-            if node in required:
+            if node in required and node.op != "placeholder":
                 interpreter.env[node] = interpreter.run_node(node)
-    torch.cuda.synchronize()
+    if synchronize:
+        torch.cuda.synchronize()
 
     missing_inputs = [
         f"{target.name}:{parent.name}"

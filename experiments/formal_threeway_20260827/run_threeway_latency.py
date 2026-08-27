@@ -46,6 +46,63 @@ def formal_latency_mean(process_means_ms: list[float]) -> float:
     return statistics.fmean(process_means_ms)
 
 
+def canonical_tensor_identity(rows: list[dict]) -> str:
+    """Canonicalize a saved tensor identity without weakening its fields."""
+    return json.dumps(
+        rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+def validate_model_reference_identities(
+    results_by_identity: dict[tuple[str, str, int], dict], repeats: int
+) -> list[dict]:
+    """Require every process and policy for one model to use one reference."""
+    audits = []
+    for model in MODELS:
+        observed = []
+        for trial in range(repeats):
+            for policy in POLICIES:
+                result = results_by_identity[(model, policy, trial)]
+                identity = result.get("reference_output_identity")
+                if not isinstance(identity, list) or not identity:
+                    raise RuntimeError(
+                        f"{model}/{policy}/trial{trial}: reference output "
+                        "identity is missing"
+                    )
+                observed.append(
+                    {
+                        "policy": policy,
+                        "trial": trial,
+                        "canonical": canonical_tensor_identity(identity),
+                        "identity": identity,
+                    }
+                )
+        signatures = {row["canonical"] for row in observed}
+        if len(signatures) != 1:
+            examples = [
+                {"policy": row["policy"], "trial": row["trial"]}
+                for row in observed
+                if row["canonical"] != observed[0]["canonical"]
+            ][:5]
+            raise RuntimeError(
+                f"{model}: reference output identity differs across the "
+                f"three policies or {repeats} processes; examples={examples}"
+            )
+        identity = observed[0]["identity"]
+        audits.append(
+            {
+                "model": model,
+                "process_policy_results": len(observed),
+                "all_reference_output_identities_identical": True,
+                "reference_output_identity": identity,
+                "reference_output_identity_sha256": hashlib.sha256(
+                    observed[0]["canonical"].encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+    return audits
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -228,10 +285,15 @@ def aggregate(output: Path, repeats: int, verification: dict) -> dict:
                 "policy": policy,
                 "trial": trial,
                 "result": str(result_path),
+                "result_relative_path": str(result_path.relative_to(output)),
                 "result_sha256": sha256_file(result_path),
                 "process_mean_ms": process_mean,
             }
         )
+
+    model_identity_audit = validate_model_reference_identities(
+        results_by_identity, repeats
+    )
 
     aggregates = {}
     for model in MODELS:
@@ -310,6 +372,16 @@ def aggregate(output: Path, repeats: int, verification: dict) -> dict:
                 raise RuntimeError(
                     f"{model}/trial{trial}: policy inputs are not byte-identical"
                 )
+            output_identities = {
+                policy: canonical_tensor_identity(
+                    result["reference_output_identity"]
+                )
+                for policy, result in identities.items()
+            }
+            if len(set(output_identities.values())) != 1:
+                raise RuntimeError(
+                    f"{model}/trial{trial}: policy reference outputs differ"
+                )
             profiles = {
                 result["profile"]["sha256"] for result in identities.values()
             }
@@ -358,6 +430,7 @@ def aggregate(output: Path, repeats: int, verification: dict) -> dict:
                     "display_name": DISPLAY_NAMES[model],
                     "input_identity": input_hashes["janus"],
                     "all_policy_inputs_byte_identical": True,
+                    "all_policy_reference_outputs_byte_identical": True,
                     "all_policy_profiles_identical": True,
                     "profile_sha256": next(iter(profiles)),
                     "reference_output_sha256": {
@@ -425,6 +498,7 @@ def aggregate(output: Path, repeats: int, verification: dict) -> dict:
         },
         "appendix_aggregates": list(aggregates.values()),
         "trial_policy_comparisons": trial_policy_comparisons,
+        "model_reference_identity_audit": model_identity_audit,
         "task_records": task_records,
     }
 
@@ -643,6 +717,26 @@ def main() -> int:
         {
             "git_head": git_head,
             "asset_verification": str(verification_path),
+            "asset_verification_relative_path": str(
+                verification_path.relative_to(output)
+            ),
+            "asset_verification_sha256": sha256_file(verification_path),
+            "ncu_cache_identity": [
+                {
+                    "model": row["model"],
+                    "model_class": row["model_class"],
+                    "ncu_cache_sha256": row["ncu_cache_sha256"],
+                    "profile_sha256": row["profile_sha256"],
+                    "ncu_fx_code_sha256": row["ncu_fx_code_sha256"],
+                    "aggregation_method": row["ncu_aggregation"].get(
+                        "method"
+                    ),
+                    "aggregation_repeat_count": row["ncu_aggregation"].get(
+                        "repeat_count"
+                    ),
+                }
+                for row in verification["records"]
+            ],
             "finished_unix": time.time(),
         }
     )

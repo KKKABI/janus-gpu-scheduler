@@ -50,6 +50,24 @@ nvidia-smi -q > "$OUT/nvidia_smi_start.txt"
   --output "$OUT/manifest.json" \
   >"$OUT/select.stdout" 2>"$OUT/select.stderr"
 
+# Audit the bounded manifest before starting any target-group timing.
+if ! "$PY" - "$OUT/manifest.json" "$OUT/INCONCLUSIVE.json" <<'PY'
+import json,sys
+manifest=json.load(open(sys.argv[1],encoding='utf-8'))
+if manifest.get('status')!='ready_for_isolated_measurement' or int(manifest.get('primary_pair_count',0))<=0:
+    json.dump({
+        'status':'inconclusive',
+        'reason':'no_planned_primary_same_class_pair',
+        'manifest_status':manifest.get('status'),
+        'primary_pair_count':manifest.get('primary_pair_count',0),
+    },open(sys.argv[2],'x',encoding='utf-8'),ensure_ascii=False,indent=2)
+    sys.exit(1)
+PY
+then
+  echo 'Stage C is inconclusive before timing: no primary same-class pair' >&2
+  exit 80
+fi
+
 # Five independent timing processes.  Pair-side order is reversed cyclically
 # so one policy is not always measured first.
 "$PY" - "$OUT/manifest.json" <<'PY' > "$OUT/timing_plan.tsv"
@@ -124,4 +142,33 @@ done < "$OUT/trace_plan.tsv"
   --output-dir "$OUT/analysis" \
   >"$OUT/aggregate.stdout" 2>"$OUT/aggregate.stderr"
 nvidia-smi -q > "$OUT/nvidia_smi_end.txt"
-touch "$OUT/COMPLETE"
+if ! "$PY" - "$OUT/manifest.json" "$OUT/analysis/summary.json" \
+  "$OUT/COMPLETE" "$OUT/INCONCLUSIVE.json" "$ACTUAL_COMMIT" <<'PY'
+import hashlib,json,sys
+manifest_path,summary_path,complete_path,inconclusive_path,git_head=sys.argv[1:]
+manifest=json.load(open(manifest_path,encoding='utf-8'))
+summary=json.load(open(summary_path,encoding='utf-8'))
+def sha(path):
+    h=hashlib.sha256()
+    with open(path,'rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):
+            h.update(block)
+    return h.hexdigest()
+record={
+    'status':summary.get('status'),
+    'git_head':git_head,
+    'manifest_sha256':sha(manifest_path),
+    'summary_sha256':sha(summary_path),
+    'primary_planned_pairs':summary.get('primary_planned_pairs',0),
+    'primary_valid_pairs':summary.get('primary_valid_pairs',0),
+    'inconclusive_reasons':summary.get('inconclusive_reasons',[]),
+}
+if summary.get('status')!='completed' or int(summary.get('primary_planned_pairs',0))<=0 or int(summary.get('primary_valid_pairs',0))<=0:
+    json.dump(record,open(inconclusive_path,'x',encoding='utf-8'),ensure_ascii=False,indent=2)
+    sys.exit(1)
+json.dump(record,open(complete_path,'x',encoding='utf-8'),ensure_ascii=False,indent=2)
+PY
+then
+  echo 'Stage C finished without a valid primary pair; marked INCONCLUSIVE' >&2
+  exit 81
+fi

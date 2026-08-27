@@ -30,7 +30,7 @@ export JANUS_FORMAL_EXPECTED_COMMIT=REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT
 
 ## A：七模型三次稳健画像
 
-本阶段不复用任何旧 NCU cache。在同一个冻结提交、输入、GPU 和软件环境下，对七个模型各独立采集 3 次，共 21 次；参考之前同规模采集，预计约 37 分钟。只有三次的完整身份、launch 数量、OP 名、kernel 名和 launch geometry 全部一致，才对同一 launch 的 DRAM、L2、Compute、Memory 和 Duration 取中位数，生成正式 cache。YOLO 统一使用 BackboneWrapper，并另外重新采集匹配的 solo OP 时长；旧 DetectionModel 数据不复用。`manifest.json` 会记录 21 次实际采集开销和每项指标的 95 分位相对波动。
+本阶段不复用任何旧 NCU cache。在同一个冻结提交、输入、GPU 和软件环境下，对七个模型各独立采集 3 次，共 21 次；参考之前同规模采集，预计约 37 分钟。单次 cache 就必须同时含有 Memory、DRAM、L2、Compute 和 Duration，缺一项立即失败。只有三次的完整身份、launch 数量、OP 名、kernel 名和 launch geometry 全部一致，才对同一 launch 的五项指标取中位数，生成正式 cache。YOLO 统一使用 BackboneWrapper，并另外重新采集匹配的 solo OP 时长；旧 DetectionModel 数据不复用。`manifest.json` 会记录 21 次实际采集开销和每项指标的 95 分位相对波动。
 
 ```bash
 export JANUS_FORMAL_REPO=/public_0/LYX/janus_formal_threeway_20260827
@@ -55,11 +55,15 @@ export JANUS_FORMAL_SOLO_ROOT=$JANUS_STAGE_A_OUT/solo_operator_profiles
 bash "$JANUS_FORMAL_REPO/experiments/formal_threeway_20260827/run_stage_b_latency.sh"
 ```
 
-主要结果是 `summary.csv` 和 `summary.json`。每个 NCU 进程的 `result.json` 都保存 `ncu_report.experimental_valid`、mapping coverage、输入字节哈希、输出正确性误差和全部 scheduler calls。三条策略都结束后，runner 会在每个任务目录写入 `cross_policy_audit.json`，并在 `comparisons/` 保存同一 trial 的三策略输入一致性、输出误差以及 NCU 是否改变最终选择。
+主要结果是 `summary.csv` 和 `summary.json`。每个 NCU 进程的 `result.json` 都保存 `ncu_report.experimental_valid`、mapping coverage、输入字节哈希、输出正确性误差和全部 scheduler calls。聚合器要求同一模型的 3 条策略、10 个独立进程共 30 份 `reference_output_identity` 完全一致，否则不生成正式汇总。三条策略都结束后，runner 会在每个任务目录写入 `cross_policy_audit.json`，并在 `comparisons/` 保存同一 trial 的三策略输入一致性、输出误差以及 NCU 是否改变最终选择。`summary.json` 还冻结 210 个结果文件 SHA、代码提交和七个 NCU cache 的哈希/身份，供 C 阶段重新验证。
 
 ## C：exact same-ready 的 Janus §4.8 配对干扰
 
-预选只使用 B 阶段调度结果，不看 slowdown。主比较是 `NewTD+DRT` 与 `NewTD+NCU-DRT`，因为两者准入完全相同；次比较是原 Janus 与 `NewTD+NCU-DRT`。仅匹配两条 trace 中唯一出现的、顺序完全相同的 `ready_ops`。
+预选只使用 B 阶段调度结果，不看 slowdown。主比较是 `NewTD+DRT` 与 `NewTD+NCU-DRT`，因为两者准入完全相同；次比较是原 Janus 与 `NewTD+NCU-DRT`。仅匹配两条 trace 中唯一出现的、顺序完全相同的 `ready_ops`。开始选组前会重新验证：B 阶段代码提交、7×3×10 任务完整性、210 个结果 SHA，以及当前传入的七个 NCU cache 与 B 阶段记录完全相同；任一不一致均停止。
+
+资源类别采用可审计的 kernel 名称规则。没有命中规则的 kernel 标为 `Unclassified`，不会再默认当成访存型；只要一个 OP 含未知 kernel，该 OP 所在组就不进入正式分类结果。manifest 会给出各模型已分类/未分类 kernel 数量、duration 覆盖率、未知名称样例和因此被拒绝的组合数。
+
+计时前先固定代表组清单，不根据 slowdown 挑结果。每个 comparison 的同类组合上限为：计算型 3 对、访存型 7 对、混合型 12 对；不足时如实记录 shortfall，不跨类别补齐。另外最多保留 6 对左右资源类别不同的探索组合，因此每个 comparison 最多 28 对、两组 comparison 总计最多 56 对。左右同类组合进入正式配对表；左右异类只进入单独的探索表，不参与主结论。
 
 每个候选组在相同微基准中测量：5 个独立 timing 进程，每个进程 100 次；另用 NSYS 标记并重放 10 次。只有一对中的两个组都至少一次出现“组内所有 OP kernel 共同重叠”时，才进入配对 slowdown 主结果。
 
@@ -68,7 +72,8 @@ export JANUS_FORMAL_REPO=/public_0/LYX/janus_formal_threeway_20260827
 export JANUS_FORMAL_EXPECTED_COMMIT=REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT
 export JANUS_STAGE_C_OUT=/public_0/LYX/janus_formal_stage_c_same_ready_20260827
 export JANUS_STAGE_B_ROOT=$JANUS_STAGE_B_OUT
+export JANUS_FORMAL_NCU_CACHE_DIR=$JANUS_STAGE_A_OUT/ncu/ncu_cache
 bash "$JANUS_FORMAL_REPO/experiments/formal_threeway_20260827/run_stage_c_same_ready.sh"
 ```
 
-`manifest.json` 保存所有 exact-ready 覆盖、未改变选择、组宽不合格、缺少 OP 映射和结构过滤记录；`analysis/summary.json` 保存逐组与逐对结果。该实验表示“被策略选中的 OP 组合在隔离共同启动时的干扰”，不是完整模型延迟。
+`manifest.json` 保存所有 exact-ready 覆盖、未改变选择、组宽不合格、缺少 OP 映射、未知 kernel、结构过滤和配额筛选记录；它会在任何 timing 前生成并审计。`analysis/primary_same_class_planned_pairs.csv` 保存主比较全部计划同类对，`analysis/primary_same_class_valid_pairs.csv` 只保存双方都通过严格重叠的有效主结果，`analysis/heterogeneous_pairs.csv` 是异类探索表，`analysis/summary.json` 保存逐组与逐对结果。只有计划的主比较同类组合数大于 0，且其中至少 1 对通过双方严格重叠检查，才生成带 SHA 和计数的 `COMPLETE`；否则生成 `INCONCLUSIVE.json`。该实验表示“被策略选中的 OP 组合在隔离共同启动时的干扰”，不是完整模型延迟。

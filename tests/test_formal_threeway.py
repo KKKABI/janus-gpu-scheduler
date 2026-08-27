@@ -22,6 +22,7 @@ from run_threeway_latency import (
     write_cross_policy_audits,
 )
 from select_same_ready_pairs import group_class, paired_subset_filter, unique_ready_map
+from verify_stage_entrypoints import SCRIPT_NAMES
 
 
 class FormalThreewayTests(unittest.TestCase):
@@ -207,11 +208,29 @@ class FormalThreewayTests(unittest.TestCase):
             210,
         )
         self.assertEqual(common.MODEL_CLASSES["YOLOv8x"], "BackboneWrapper")
-        stage_a = (
-            FORMAL / "run_stage_a_profiles.sh"
-        ).read_text(encoding="utf-8")
+        stage_a = (FORMAL / "run_stage_a_profiles.sh").read_text(encoding="utf-8")
         self.assertIn("--repeats 3", stage_a)
         self.assertNotIn("REUSE_NCU", stage_a)
+
+    def test_stage_entrypoints_self_resolve_and_pin_the_commit(self):
+        self.assertEqual(len(SCRIPT_NAMES), 3)
+        for name in SCRIPT_NAMES:
+            source = (FORMAL / name).read_text(encoding="utf-8")
+            self.assertIn('SCRIPT_PATH=$(realpath "${BASH_SOURCE[0]}")', source)
+            self.assertIn('DEFAULT_REPO=$(realpath "$SCRIPT_DIR/../..")', source)
+            self.assertIn("JANUS_FORMAL_EXPECTED_COMMIT", source)
+            self.assertIn('ACTUAL_COMMIT=$(git -C "$REPO" rev-parse HEAD)', source)
+            self.assertIn('[[ "$ACTUAL_COMMIT" != "$EXPECTED_COMMIT" ]]', source)
+            self.assertIn("EXPECTED_SCRIPT=$(realpath", source)
+            self.assertNotIn("janus_release_newtd_ncu_20260827", source)
+            self.assertLess(source.index("ACTUAL_COMMIT="), source.index("OUT="))
+            self.assertLess(source.index("ACTUAL_COMMIT="), source.index("nvidia-smi"))
+
+        readme = (FORMAL / "README.md").read_text(encoding="utf-8")
+        self.assertIn("/public_0/LYX/janus_formal_threeway_20260827", readme)
+        self.assertNotIn("/public_0/LYX/janus_release_newtd_ncu_20260827", readme)
+        self.assertIn("verify_stage_entrypoints.py", readme)
+        self.assertIn("REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT", readme)
 
     def test_formal_latency_is_one_arithmetic_mean(self):
         values = [float(index) for index in range(1, 11)]

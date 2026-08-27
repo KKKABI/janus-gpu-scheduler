@@ -376,9 +376,16 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, al
     # 可选：用 Nsight Compute 获取 memory 指标
     try:
         from Opara.ncu_profiler import profile_and_merge
-        profile_and_merge(graph_module, inputs, ncu_model_class_name)
+        profile_and_merge(
+            graph_module,
+            inputs,
+            ncu_model_class_name,
+            profile_path=path,
+        )
     except Exception:
-        pass  # ncu 不可用或超时，退回到无 memory 数据模式
+        if os.getenv("JANUS_REQUIRE_VALID_NCU") == "1":
+            raise
+        pass  # 非正式模式下 ncu 不可用时退回到无 memory 数据模式
 
     for i, node in enumerate(graph_module.graph.nodes):
         if not hasattr(node, 'info'):

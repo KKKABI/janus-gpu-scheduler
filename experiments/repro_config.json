@@ -357,9 +357,9 @@
     "YOLOv8x": {
       "role": "primary",
       "reference": "yolov8_example.py",
-      "reference_deviation": "The reference script captures only model.model[0]; this corrected experiment captures the complete DetectionModel.",
-      "constructor": "YOLO('/public_0/ZYF/model/YOLOv8/yolov8x.pt').model",
-      "capture_backend": "make_fx",
+      "reference_deviation": "The formal experiment follows the repository example and captures only model.model[0] through an explicitly named BackboneWrapper.",
+      "constructor": "BackboneWrapper(YOLO('/public_0/ZYF/model/YOLOv8/yolov8x.pt').model)",
+      "capture_backend": "dynamo_explain",
       "inputs": [
         {
           "name": "image",
@@ -375,7 +375,9 @@
       ],
       "warmup_iterations": 10,
       "timed_iterations": 100,
-      "profile_file": "DetectionModel_torch.Size([1, 3, 320, 320]).pt.trace.json"
+      "profile_file": "BackboneWrapper_torch.Size([1, 3, 320, 320]).pt.trace.json",
+      "formal_display_name": "YOLOv8x BackboneWrapper",
+      "scope_note": "first backbone stage only; not the complete DetectionModel"
     },
     "ConvNeXt": {
       "role": "primary",

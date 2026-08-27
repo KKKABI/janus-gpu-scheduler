@@ -11,9 +11,6 @@ import subprocess
 import sys
 
 
-EXPECTED_HEAD = "32bf4974994005855896a360c34ba455303f5ff3"
-
-
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -158,8 +155,6 @@ def main() -> int:
     head = subprocess.check_output(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
     ).strip()
-    if head != EXPECTED_HEAD:
-        raise RuntimeError(f"unexpected head: {head}")
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     if manifest["git_head"] != head:
         raise RuntimeError("manifest git head differs")

@@ -54,9 +54,8 @@ def load_model_and_inputs(name: str, config: dict[str, Any]):
         model = pretrainedmodels.__dict__["nasnetalarge"](num_classes=1000, pretrained="imagenet")
         inputs = (torch.randint(0, 256, (1, 3, 331, 331), dtype=torch.float32, device="cuda:0"),)
     elif name == "YOLOv8x":
-        from ultralytics import YOLO
-        model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model
-        inputs = (torch.randn((1, 3, 320, 320), device="cuda:0"),)
+        from model_wrappers import build_yolov8x_backbone
+        model, inputs = build_yolov8x_backbone()
     elif name == "ConvNeXt":
         import torchvision
         model = torchvision.models.convnext_base(pretrained=False)

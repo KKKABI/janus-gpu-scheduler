@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO=${JANUS_FORMAL_REPO:-/public_0/LYX/janus_release_newtd_ncu_20260827}
+OUT=${JANUS_STAGE_C_OUT:?JANUS_STAGE_C_OUT must be set to a new directory}
+LATENCY=${JANUS_STAGE_B_ROOT:?JANUS_STAGE_B_ROOT must point to completed stage B}
+CACHE=${JANUS_FORMAL_NCU_CACHE_DIR:?JANUS_FORMAL_NCU_CACHE_DIR must be set}
+PY=${JANUS_FORMAL_PYTHON:-/home/lyx/.conda/envs/opara/bin/python}
+NSYS=${JANUS_FORMAL_NSYS:-/opt/nvidia/nsight-systems/2024.3.1/target-linux-x64/nsys}
+DIR=$REPO/experiments/formal_threeway_20260827
+
+test ! -e "$OUT"
+mkdir -p "$OUT"
+exec 9>/tmp/janus_gpu0.lock
+flock -n 9 || { echo 'GPU experiment lock is busy' >&2; exit 75; }
+if nvidia-smi --query-compute-apps=pid --format=csv,noheader,nounits \
+  | grep -q '[0-9]'; then
+  echo 'GPU has an active compute process' >&2
+  exit 76
+fi
+test -f "$LATENCY/COMPLETE"
+test -f "$LATENCY/summary.json"
+test ! -n "$(git -C "$REPO" status --porcelain)" || {
+  echo 'formal worktree must be clean' >&2
+  exit 77
+}
+
+git -C "$REPO" rev-parse HEAD > "$OUT/git_head.txt"
+nvidia-smi -q > "$OUT/nvidia_smi_start.txt"
+"$PY" "$DIR/select_same_ready_pairs.py" \
+  --latency-root "$LATENCY" --ncu-cache-dir "$CACHE" \
+  --output "$OUT/manifest.json" \
+  >"$OUT/select.stdout" 2>"$OUT/select.stderr"
+
+# Five independent timing processes.  Pair-side order is reversed cyclically
+# so one policy is not always measured first.
+"$PY" - "$OUT/manifest.json" <<'PY' > "$OUT/timing_plan.tsv"
+import json,sys
+p=json.load(open(sys.argv[1],encoding='utf-8'))
+by_id={row['case_id']:row for row in p['cases']}
+for trial in range(5):
+    for pair_index,pair in enumerate(p['pairs']):
+        ids=list(pair['case_ids'])
+        if (trial+pair_index)%2:
+            ids.reverse()
+        for case_id in ids:
+            row=by_id[case_id]
+            print(trial,case_id,row['model'],row['call'],row['profile_sha256'],row['fx_code_sha256'],'|'.join(row['group']),sep='\t')
+PY
+
+while IFS=$'\t' read -r trial case_id model call profile_sha fx_sha group_csv; do
+  test -n "$case_id" || continue
+  IFS='|' read -r -a group <<< "$group_csv"
+  case_out=$OUT/results/$case_id/timing
+  mkdir -p "$case_out"
+  "$PY" "$DIR/profile_group_resources.py" \
+    --model "$model" --call "$call" --group "${group[@]}" \
+    --expected-profile-sha256 "$profile_sha" \
+    --expected-fx-code-sha256 "$fx_sha" \
+    --mode timing --warmup 10 --repeats 100 --skip-idle-check \
+    --output-json "$case_out/trial_$(printf '%02d' "$trial").json" \
+    >"$case_out/trial_$(printf '%02d' "$trial").stdout" \
+    2>"$case_out/trial_$(printf '%02d' "$trial").stderr"
+done < "$OUT/timing_plan.tsv"
+
+"$PY" - "$OUT/manifest.json" <<'PY' > "$OUT/trace_plan.tsv"
+import json,sys
+p=json.load(open(sys.argv[1],encoding='utf-8'))
+for pair_index,pair in enumerate(p['pairs']):
+    ids=list(pair['case_ids'])
+    if pair_index%2:
+        ids.reverse()
+    by_id={row['case_id']:row for row in p['cases']}
+    for case_id in ids:
+        row=by_id[case_id]
+        print(case_id,row['model'],row['call'],row['profile_sha256'],row['fx_code_sha256'],'|'.join(row['group']),sep='\t')
+PY
+
+while IFS=$'\t' read -r case_id model call profile_sha fx_sha group_csv; do
+  test -n "$case_id" || continue
+  IFS='|' read -r -a group <<< "$group_csv"
+  case_out=$OUT/results/$case_id/nsys
+  mkdir -p "$case_out"
+  "$NSYS" profile \
+    --trace=cuda,nvtx,cudnn,cublas --sample=none --cpuctxsw=none \
+    --cuda-graph-trace=node --show-output=false --export=sqlite \
+    --force-overwrite=true -o "$case_out/full_trace" \
+    "$PY" "$DIR/profile_group_resources.py" \
+      --model "$model" --call "$call" --group "${group[@]}" \
+      --expected-profile-sha256 "$profile_sha" \
+      --expected-fx-code-sha256 "$fx_sha" \
+      --mode trace --warmup 10 --repeats 10 --skip-idle-check \
+      --output-json "$case_out/execution.json" \
+    >"$case_out/profile.stdout" 2>"$case_out/profile.stderr"
+  test -s "$case_out/full_trace.sqlite"
+  "$PY" "$DIR/analyze_nsys_group.py" \
+    --sqlite "$case_out/full_trace.sqlite" \
+    --execution-json "$case_out/execution.json" \
+    --output-json "$case_out/overlap.json" \
+    >"$case_out/analyze.stdout" 2>"$case_out/analyze.stderr"
+done < "$OUT/trace_plan.tsv"
+
+"$PY" "$DIR/aggregate_same_ready.py" \
+  --manifest "$OUT/manifest.json" \
+  --results-root "$OUT/results" \
+  --output-dir "$OUT/analysis" \
+  >"$OUT/aggregate.stdout" 2>"$OUT/aggregate.stderr"
+nvidia-smi -q > "$OUT/nvidia_smi_end.txt"
+touch "$OUT/COMPLETE"

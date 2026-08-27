@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 import random
@@ -28,6 +29,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeat-index", required=True, type=int)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--max-ready", default=15, type=int)
+    parser.add_argument("--warmup-iterations", type=int)
+    parser.add_argument("--timed-iterations", type=int)
+    parser.add_argument("--skip-idle-check", action="store_true")
     return parser.parse_args()
 
 
@@ -56,9 +60,8 @@ def load_model_and_inputs(name: str, config: dict[str, Any]):
         model = pretrainedmodels.__dict__["nasnetalarge"](num_classes=1000, pretrained="imagenet")
         inputs = (torch.randint(0, 256, (1, 3, 331, 331), dtype=torch.float32, device="cuda:0"),)
     elif name == "YOLOv8x":
-        from ultralytics import YOLO
-        model = YOLO("/public_0/ZYF/model/YOLOv8/yolov8x.pt").model
-        inputs = (torch.randn((1, 3, 320, 320), device="cuda:0"),)
+        from model_wrappers import build_yolov8x_backbone
+        model, inputs = build_yolov8x_backbone()
     elif name == "ConvNeXt":
         import torchvision
         model = torchvision.models.convnext_base(pretrained=False)
@@ -83,6 +86,19 @@ def tensor_leaves(value: Any) -> list[Any]:
     if isinstance(value, (tuple, list)):
         return [leaf for item in value for leaf in tensor_leaves(item)]
     return []
+
+
+def tensor_identity(value: Any) -> dict[str, Any]:
+    """Hash one tensor's exact bytes for cross-process input/output audit."""
+    import torch
+
+    tensor = value.detach().to("cpu").contiguous()
+    raw = tensor.view(torch.uint8).numpy().tobytes()
+    return {
+        "shape": list(tensor.shape),
+        "dtype": str(tensor.dtype),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
 
 
 def compare_outputs(reference: list[Any], candidate: Any, rtol: float, atol: float) -> dict[str, Any]:
@@ -174,7 +190,9 @@ def main() -> int:
     try:
         expected_python = Path(config["environment"]["python_executable"]).resolve()
         if not Path(sys.executable).resolve().samefile(expected_python): raise RuntimeError(f"wrong interpreter: {sys.executable}; expected {expected_python}")
-        require_idle_gpu(); seed_everything(int(config["measurement"]["seed"]))
+        if not args.skip_idle_check:
+            require_idle_gpu()
+        seed_everything(int(config["measurement"]["seed"]))
         import torch
         from Opara import GraphCapturer
         before_load = gpu_snapshot(); model, inputs = load_model_and_inputs(task.model, config)
@@ -184,7 +202,9 @@ def main() -> int:
             raise RuntimeError(f"profile identity mismatch: runtime={profile.name}; configured={configured_profile}")
         if not profile.is_file():
             raise RuntimeError(f"frozen profile is missing; refusing automatic generation: {profile}")
+        input_identity = [tensor_identity(tensor) for tensor in inputs]
         with torch.inference_mode(): reference = [tensor.detach().clone() for tensor in tensor_leaves(model(*inputs))]
+        reference_output_identity = [tensor_identity(tensor) for tensor in reference]
         params = variant_parameters(task, config)
         newtd_state = None
         newtd_original = None
@@ -228,7 +248,7 @@ def main() -> int:
                     os.environ.get("JANUS_NEW_TD_LAUNCH_GAP_MS", "0.004096")
                 ),
                 minimum_overlap_us=float(
-                    os.environ.get("JANUS_NEW_TD_MIN_OVERLAP_US", "5.0")
+                    os.environ.get("JANUS_NEW_TD_MIN_OVERLAP_US", "2.0")
                 ),
             )
         params["max_ready"] = args.max_ready
@@ -269,6 +289,16 @@ def main() -> int:
             os.environ["OPARA_TD_RISK_PENALTY"] = str(
                 params["interference_risk_penalty"]
             )
+        require_valid_ncu = os.environ.get("JANUS_REQUIRE_VALID_NCU") == "1"
+        if require_valid_ncu and os.environ.get("JANUS_ALLOW_LEGACY_NCU") == "1":
+            raise RuntimeError(
+                "formal NCU mode forbids JANUS_ALLOW_LEGACY_NCU=1"
+            )
+        from Opara import ncu_profiler
+
+        # Every task runs in a fresh process, but explicitly clear this module
+        # global so a failed merge can never inherit an earlier valid report.
+        ncu_profiler.LAST_NCU_REPORT = None
         capture_backend = config["models"][task.model].get("capture_backend", "dynamo_explain")
         capture_started = time.perf_counter()
         try:
@@ -280,6 +310,15 @@ def main() -> int:
 
                 restore_newtd_pair_admission(ResourceModel, newtd_original)
         capture_build_seconds = time.perf_counter() - capture_started
+        ncu_report = ncu_profiler.LAST_NCU_REPORT
+        if require_valid_ncu:
+            if not isinstance(ncu_report, dict):
+                raise RuntimeError("NCU merge emitted no LAST_NCU_REPORT")
+            if not ncu_report.get("experimental_valid"):
+                raise RuntimeError(
+                    "identity-checked NCU cache was rejected: "
+                    + repr(ncu_report)
+                )
         from Opara.Scheduler import get_candidate_stats
         scheduler_calls = get_candidate_stats(clear=True)
         total_enumerated = sum(item["enumerated_count"] for item in scheduler_calls)
@@ -381,6 +420,14 @@ def main() -> int:
             "selected_concurrent_call_count": len(
                 selected_concurrent_interference
             ),
+            "selected_concurrent_ncu_nonzero_count": sum(
+                float(item.get("ncu_coverage", 0.0)) > 0.0
+                for item in selected_concurrent_interference
+            ),
+            "selected_concurrent_ncu_zero_count": sum(
+                float(item.get("ncu_coverage", 0.0)) <= 0.0
+                for item in selected_concurrent_interference
+            ),
             "selected_concurrent_call_rate": (
                 len(selected_concurrent_interference) / len(scheduler_calls)
                 if scheduler_calls else 0.0
@@ -411,7 +458,15 @@ def main() -> int:
         }
         with torch.no_grad(): candidate = runner(*inputs)
         correctness = compare_outputs(reference, candidate, float(config["correctness"]["float_rtol"]), float(config["correctness"]["float_atol"]))
-        spec = config["models"][task.model]
+        spec = dict(config["models"][task.model])
+        if args.warmup_iterations is not None:
+            if args.warmup_iterations < 1:
+                raise ValueError("--warmup-iterations must be positive")
+            spec["warmup_iterations"] = args.warmup_iterations
+        if args.timed_iterations is not None:
+            if args.timed_iterations < 1:
+                raise ValueError("--timed-iterations must be positive")
+            spec["timed_iterations"] = args.timed_iterations
         cache = torch.empty(int(config["measurement"]["cache_buffer_bytes"]), dtype=torch.int8, device="cuda:0")
         for _ in range(int(spec["warmup_iterations"])): cache.zero_(); runner(*inputs)
         torch.cuda.synchronize(); before_timing = gpu_snapshot(); samples = []
@@ -421,7 +476,7 @@ def main() -> int:
             start.record(); runner(*inputs); end.record(); end.synchronize(); value = float(start.elapsed_time(end))
             if not math.isfinite(value): raise RuntimeError(f"non-finite timing sample: {value}")
             samples.append(value)
-        result = {"schema_version": 1, "status": "completed", "task": task.to_dict(), "effective_parameters": params, "new_td_admission": newtd_state, "scheduler": {"summary": scheduler_summary, "calls": scheduler_calls}, "model_spec": spec, "profile": {"path": str(profile), "sha256": sha256_file(profile)}, "correctness": correctness, "timing": {"samples_ms": samples, "statistics": stats_from_samples(samples)}, "telemetry": {"before_model_load": before_load, "before_timing": before_timing, "after_timing": gpu_snapshot()}, "runtime": {**runtime_metadata(), "torch": torch.__version__, "torch_cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "cudnn_benchmark": torch.backends.cudnn.benchmark, "cudnn_deterministic": torch.backends.cudnn.deterministic}, "started_unix": started, "finished_unix": time.time()}
+        result = {"schema_version": 1, "status": "completed", "task": task.to_dict(), "effective_parameters": {**params, "require_valid_ncu": require_valid_ncu}, "input_identity": input_identity, "reference_output_identity": reference_output_identity, "new_td_admission": newtd_state, "ncu_report": ncu_report, "ncu_profile": ncu_report, "scheduler": {"summary": scheduler_summary, "calls": scheduler_calls}, "model_spec": spec, "profile": {"path": str(profile), "sha256": sha256_file(profile)}, "correctness": correctness, "timing": {"samples_ms": samples, "statistics": stats_from_samples(samples)}, "telemetry": {"before_model_load": before_load, "before_timing": before_timing, "after_timing": gpu_snapshot()}, "runtime": {**runtime_metadata(), "torch": torch.__version__, "torch_cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "cudnn_benchmark": torch.backends.cudnn.benchmark, "cudnn_deterministic": torch.backends.cudnn.deterministic}, "started_unix": started, "finished_unix": time.time()}
         write_json_atomic(output_dir / "result.json", result); write_json_atomic(status_path, {"status": "completed", "task": task.to_dict()}); return 0
     except Exception as error:
         failure = {"status": "failed", "task": task.to_dict(), "error_type": type(error).__name__, "error": str(error), "traceback": traceback.format_exc(), "started_unix": started, "finished_unix": time.time()}

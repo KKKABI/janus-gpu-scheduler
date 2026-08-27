@@ -2,7 +2,7 @@
 
 Model construction, weights, inputs, warm-up counts and iteration counts follow the matching files under `/public_0/LYX/PriorityOpara_v0/examples`.
 
-Exception: the reference `yolov8_example.py` captures only `model.model[0]`, which is one Conv block. The corrected `YOLOv8x` task captures the complete Ultralytics `DetectionModel` and uses the matching frozen `DetectionModel_...trace.json` profile. Old BackboneWrapper results remain historical proxy data and must not be labeled as full YOLOv8x.
+Scope note: the reference `yolov8_example.py` captures only `model.model[0]`, which is one Conv block. The frozen formal task follows that reference through an explicitly named `YOLOv8x BackboneWrapper` and uses the matching `BackboneWrapper_...trace.json` profile. It must not be labeled as the complete Ultralytics DetectionModel.
 
 Activate the frozen environment and enter the isolated worktree:
 

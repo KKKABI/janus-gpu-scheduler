@@ -12,7 +12,7 @@ import os
 import sys
 path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
-output_file = open(output_file_path, "w")
+output_file = open(os.getenv("JANUS_GRAPH_OUTPUT_PATH", output_file_path), "w")
 
 class Scheduler(Interpreter):
 
@@ -158,7 +158,7 @@ def capturer(inputs, model, copy_outputs: bool = False, sm_fraction: float = 1.0
     Critical_node.mark_critical_nodes(graph)
     OperatorLauncher.recompile(model_class_name, fx_module, inputs, all_streams, max_width, sm_fraction)
 
-    print(stream for stream in all_streams)
+    # print(stream for stream in all_streams)
         
     for node in graph.nodes:
         for input_node in node.all_input_nodes:

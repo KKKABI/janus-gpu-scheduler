@@ -9,7 +9,7 @@ from Opara.Scheduler import Scheduler, OperatorTask, KernelProfile, ResourceMode
 import os
 path = os.path.abspath(os.path.dirname(__file__))
 output_file_path = path + '/profile_result/output.txt'
-output_file = open(output_file_path, "w")
+output_file = open(os.getenv("JANUS_OPERATOR_OUTPUT_PATH", output_file_path), "w")
 
 def pop_lowPriorty_from_queue(queue, tau=0.5):
     """根据 Co-location Suitability Score (CSS) 从队列中弹出低优先级算子。
@@ -395,7 +395,7 @@ def recompile(model_class_name, graph_module, inputs, all_streams, max_width, sm
     
     
 
-    with open('output.txt', 'w') as f:
+    with open(os.getenv("JANUS_DEBUG_OUTPUT_PATH", "output.txt"), 'w') as f:
         sys.stdout = f
         for node in graph_module.graph.nodes:
             if node.info:  

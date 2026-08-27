@@ -10,10 +10,6 @@ the worker.
 from __future__ import annotations
 
 import argparse
-try:
-    import fcntl
-except ModuleNotFoundError:  # Allows platform-neutral unit tests; clients run on Linux.
-    fcntl = None
 import json
 import math
 import os
@@ -27,7 +23,7 @@ from typing import Iterable
 from multi_janus_models import MODEL_CHOICES
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def atomic_json(path: Path, payload) -> None:
@@ -155,32 +151,6 @@ def wait_until(target_ns: int) -> None:
             time.sleep(min(remaining / 1e9 / 2.0, 0.005))
 
 
-def read_turn(stream) -> int:
-    stream.seek(0)
-    value = stream.read().strip()
-    return int(value or "0")
-
-
-def write_turn(stream, value: int) -> None:
-    stream.seek(0)
-    stream.truncate()
-    stream.write(str(value))
-    stream.flush()
-    os.fsync(stream.fileno())
-
-
-def acquire_round_robin(stream, client_id: int, client_count: int) -> None:
-    if fcntl is None:
-        raise RuntimeError("round-robin replay requires Linux fcntl")
-    while True:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-        turn = read_turn(stream)
-        if turn % client_count == client_id:
-            return
-        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-        time.sleep(0.0001)
-
-
 def run_client(args) -> int:
     import torch
 
@@ -190,18 +160,20 @@ def run_client(args) -> int:
         load_model,
     )
 
+    process_start_ns = time.monotonic_ns()
     output_dir = Path(args.output_dir).resolve()
     control_dir = output_dir / "control"
     log_identity = f"client_{args.client_id}_{args.model}"
     ready_path = control_dir / f"ready_{args.client_id}.json"
     result_path = output_dir / "clients" / f"{log_identity}.json"
     start_path = control_dir / "start.json"
-    turn_path = control_dir / "turn.txt"
 
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     torch.cuda.set_device(0)
+    model_load_start_ns = time.monotonic_ns()
     model, inputs = load_model(args.model, args.batch_size)
+    model_load_end_ns = time.monotonic_ns()
 
     with torch.inference_mode():
         eager_reference = clone_tensor_leaves(model(*inputs))
@@ -212,6 +184,7 @@ def run_client(args) -> int:
         sys.path.insert(0, str(repo_root))
     from Opara import GraphCapturer
 
+    graph_build_start_ns = time.monotonic_ns()
     runner = GraphCapturer.capturer(
         inputs, model, copy_outputs=False, sm_fraction=args.sm_fraction
     )
@@ -219,6 +192,7 @@ def run_client(args) -> int:
         first_graph_output = runner(*inputs)
     torch.cuda.synchronize()
     correctness = compare_outputs(eager_reference, first_graph_output)
+    graph_build_end_ns = time.monotonic_ns()
 
     with torch.inference_mode():
         for _ in range(args.warmups):
@@ -226,6 +200,14 @@ def run_client(args) -> int:
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats()
 
+    ready_ns = time.monotonic_ns()
+    preparation = {
+        "process_to_ready_ms": (ready_ns - process_start_ns) / 1e6,
+        "model_load_ms": (model_load_end_ns - model_load_start_ns) / 1e6,
+        "graph_build_and_first_replay_ms": (
+            graph_build_end_ns - graph_build_start_ns
+        ) / 1e6,
+    }
     atomic_json(
         ready_path,
         {
@@ -234,6 +216,7 @@ def run_client(args) -> int:
             "model": args.model,
             "batch_size": args.batch_size,
             "correctness": correctness,
+            "preparation": preparation,
             "memory_allocated_bytes": torch.cuda.memory_allocated(),
             "memory_reserved_bytes": torch.cuda.memory_reserved(),
         },
@@ -245,18 +228,18 @@ def run_client(args) -> int:
     scheduled_start_ns = int(start_payload["scheduled_start_monotonic_ns"])
     wait_until(scheduled_start_ns)
 
-    turn_stream = None
-    if args.effective_mode == "sequential":
-        turn_stream = turn_path.open("r+", encoding="utf-8")
+    sequential = args.effective_mode == "sequential"
+    if sequential and (args.turn_read_fd is None or args.turn_write_fd is None):
+        raise RuntimeError("sequential client is missing its in-memory token pipe")
 
     samples = []
     with torch.inference_mode():
         for iteration in range(args.iterations):
             request_ready_ns = time.monotonic_ns()
-            if turn_stream is not None:
-                acquire_round_robin(
-                    turn_stream, args.client_id, args.client_count
-                )
+            if sequential:
+                token = os.read(args.turn_read_fd, 1)
+                if token != b"1":
+                    raise RuntimeError(f"invalid or closed turn token: {token!r}")
 
             service_start_ns = time.monotonic_ns()
             start_event = torch.cuda.Event(enable_timing=True)
@@ -268,10 +251,12 @@ def run_client(args) -> int:
             service_end_ns = time.monotonic_ns()
             gpu_event_ms = float(start_event.elapsed_time(end_event))
 
-            if turn_stream is not None:
-                turn = read_turn(turn_stream)
-                write_turn(turn_stream, turn + 1)
-                fcntl.flock(turn_stream.fileno(), fcntl.LOCK_UN)
+            is_final_turn = (
+                iteration == args.iterations - 1
+                and args.client_id == args.client_count - 1
+            )
+            if sequential and not is_final_turn:
+                os.write(args.turn_write_fd, b"1")
 
             samples.append(
                 {
@@ -286,8 +271,9 @@ def run_client(args) -> int:
                 }
             )
 
-    if turn_stream is not None:
-        turn_stream.close()
+    if sequential:
+        os.close(args.turn_read_fd)
+        os.close(args.turn_write_fd)
     result = {
         "schema_version": SCHEMA_VERSION,
         "client_id": args.client_id,
@@ -298,6 +284,7 @@ def run_client(args) -> int:
         "iterations": args.iterations,
         "warmups": args.warmups,
         "correctness": correctness,
+        "preparation": preparation,
         "memory_allocated_bytes": torch.cuda.memory_allocated(),
         "memory_reserved_bytes": torch.cuda.memory_reserved(),
         "max_memory_allocated_bytes": torch.cuda.max_memory_allocated(),
@@ -387,7 +374,6 @@ def run_parent(args) -> int:
     control_dir.mkdir()
     clients_dir.mkdir()
     logs_dir.mkdir()
-    (control_dir / "turn.txt").write_text("0", encoding="utf-8")
 
     batch_sizes = args.batch_sizes or [1] * len(args.models)
     if len(batch_sizes) == 1 and len(args.models) > 1:
@@ -416,6 +402,11 @@ def run_parent(args) -> int:
 
     processes = []
     log_streams = []
+    turn_pipes = (
+        [os.pipe() for _ in args.models]
+        if effective_mode == "sequential"
+        else []
+    )
     for client_id, (model, batch_size) in enumerate(
         zip(args.models, batch_sizes)
     ):
@@ -444,6 +435,19 @@ def run_parent(args) -> int:
             "--output-dir",
             str(output_dir),
         ]
+        passed_fds = ()
+        if turn_pipes:
+            read_fd = turn_pipes[client_id][0]
+            write_fd = turn_pipes[(client_id + 1) % len(turn_pipes)][1]
+            command.extend(
+                (
+                    "--turn-read-fd",
+                    str(read_fd),
+                    "--turn-write-fd",
+                    str(write_fd),
+                )
+            )
+            passed_fds = (read_fd, write_fd)
         environment = os.environ.copy()
         environment["CUDA_VISIBLE_DEVICES"] = "0"
         environment["JANUS_DEBUG_OUTPUT_PATH"] = str(
@@ -463,8 +467,15 @@ def run_parent(args) -> int:
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 text=True,
+                pass_fds=passed_fds,
             )
         )
+
+    if turn_pipes:
+        os.write(turn_pipes[0][1], b"1")
+        for read_fd, write_fd in turn_pipes:
+            os.close(read_fd)
+            os.close(write_fd)
 
     try:
         wait_for_ready(control_dir, processes, args.timeout)
@@ -492,7 +503,7 @@ def run_parent(args) -> int:
 
     metadata = {
         "schema_version": SCHEMA_VERSION,
-        "protocol": "multi_janus_closed_loop_v1",
+        "protocol": "multi_janus_closed_loop_v2_pipe_token",
         "mode_requested": args.mode,
         "mode_effective": effective_mode,
         "lookup_decision": lookup,
@@ -541,6 +552,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--model", choices=MODEL_CHOICES)
     result.add_argument("--batch-size", type=int, default=1)
     result.add_argument("--effective-mode", choices=("sequential", "concurrent"))
+    result.add_argument("--turn-read-fd", type=int)
+    result.add_argument("--turn-write-fd", type=int)
     return result
 
 

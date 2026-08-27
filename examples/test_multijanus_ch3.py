@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import unittest
+from pathlib import Path
 
 from build_compatibility_table import build_entry
 from multi_janus_benchmark import pair_key, percentile, stats
@@ -51,6 +52,13 @@ class MultiJanusUnitTests(unittest.TestCase):
         self.assertEqual(result["count"], 4)
         self.assertEqual(result["median"], 1)
         self.assertGreater(result["p95"], 8)
+
+    def test_sequential_path_has_no_disk_sync(self):
+        source = Path(__file__).with_name("multi_janus_benchmark.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("os.fsync", source)
+        self.assertIn("os.pipe()", source)
 
     def test_lookup_accepts_good_pair(self):
         serial = [fake_result("sequential", 2.0, 100.0, [1.0, 1.0])]
